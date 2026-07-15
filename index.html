@@ -1,0 +1,1312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FSCR Beta — Full Service Contract Review</title>
+<style>
+  :root{--bg:#f5f3ee;--surface:#fff;--surface2:#faf8f3;--ink:#1F2937;--soft:#4b5563;--faint:#8a8d93;
+  --line:#e7e3d8;--strong:#d3cdbc;--navy:#1F2937;--navysoft:#f4ecd9;--gold:#C9A34D;--gold-deep:#a8843a;
+  --ok:#15803d;--okbg:#e9f4ed;
+  --bad:#b42318;--badbg:#fbeae8;--warn:#92600a;--warnbg:#fbf1d8;--r:8px;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--sans:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;--shadow:0 1px 2px rgba(28,29,31,.04)}
+  [data-theme="dark"]{--bg:#16171b;--surface:#1f2127;--surface2:#282a31;--ink:#eceae4;--soft:#b8b5ac;--faint:#84868c;--line:#2e3037;--strong:#3d4048;--navy:#C9A34D;--navysoft:#2e2818;--gold:#C9A34D;--gold-deep:#dcb968;--ok:#5fbe82;--okbg:#16281d;--bad:#e0685c;--badbg:#33201d;--warn:#d3a04a;--warnbg:#32290f;--shadow:none}
+  *{box-sizing:border-box;margin:0}
+  body{font:13px/1.5 var(--sans);background:var(--bg);color:var(--ink);padding:0 0 80px}
+  .top{position:sticky;top:0;background:var(--surface);border-bottom:1px solid var(--line);padding:10px 20px;
+    display:flex;gap:14px;align-items:center;z-index:5;flex-wrap:wrap}
+  .top b{font-size:15px}.top .sub{font-size:12px;color:var(--faint)}
+  .beta-badge{background:var(--navysoft);color:var(--gold-deep);border:1px solid var(--gold);font-size:10px;font-weight:700;letter-spacing:.05em;padding:3px 10px;border-radius:var(--r)}
+  [data-theme="dark"] .beta-badge{color:var(--gold)}
+  .spacer{flex:1}
+  main{max-width:920px;margin:20px auto;padding:0 20px}
+  h2{font-size:17px;margin:18px 0 4px}
+  .note{font-size:12px;color:var(--faint);margin-bottom:12px}
+  .sec{display:flex;align-items:center;gap:10px;margin:22px 0 8px}
+  .sec h3{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint)}
+  .sec .rule{flex:1;height:1px;background:var(--line)}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin-bottom:10px;box-shadow:var(--shadow)}
+  button{font:inherit;font-size:12px;padding:5px 12px;border:1px solid var(--strong);background:var(--surface);border-radius:var(--r);cursor:pointer;transition:background .12s}
+  button:hover{background:var(--surface2)}
+  button.primary{background:#1F2937;border-color:var(--gold);color:#fff}
+  button.primary:hover{background:#2b3a4f}
+  [data-theme="dark"] button.primary{background:var(--gold);border-color:var(--gold);color:#1F2937;font-weight:600}
+  [data-theme="dark"] button.primary:hover{background:var(--gold-deep)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  input,textarea,select{font:inherit;font-size:12px;padding:5px 9px;border:1px solid var(--strong);border-radius:var(--r)}
+  .mono{font-family:var(--mono)}
+  .badge{font-size:10px;font-weight:700;letter-spacing:.04em;padding:2px 8px;border-radius:var(--r)}
+  .b-hold{background:var(--badbg);color:var(--bad)}.b-alert{background:var(--warnbg);color:var(--warn)}
+  .b-ok{background:var(--okbg);color:var(--ok)}.b-navy{background:var(--navysoft);color:var(--navy)}
+  .field{display:grid;grid-template-columns:165px 1fr auto;gap:4px 14px;padding:10px 0;border-bottom:1px solid var(--line);align-items:start}
+  .field:last-child{border:none}
+  .f-label{font-weight:600;font-size:12px}.f-label small{display:block;font-weight:400;color:var(--faint)}
+  .f-val{font-family:var(--mono);font-size:12px;white-space:pre-wrap}
+  .f-why{grid-column:2;font-size:11px;color:var(--warn)}
+  .f-acc{grid-column:2/4;margin-top:2px}
+  .f-act{display:flex;gap:8px;align-items:center;font-size:11px}
+  .issue{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;border:1px solid var(--line);border-left:3px solid var(--strong);border-radius:var(--r);padding:10px 12px;margin-bottom:8px;background:var(--surface)}
+  .issue.hold{border-left-color:var(--bad)}.issue.alert{border-left-color:var(--warn)}.issue.res{border-left-color:var(--ok);opacity:.85}
+  .issue .lab{grid-column:2;font-weight:600;font-size:12px}
+  .issue .meta{grid-column:2;font-size:11px;color:var(--faint)}
+  .issue .act{grid-column:2;font-size:11px;color:var(--soft)}
+  .rform{grid-column:2;display:flex;gap:6px;flex-wrap:wrap;margin-top:5px}
+  .rform input:first-child{flex:1;min-width:230px}
+  .rform .ini{width:60px}
+  table{width:100%;border-collapse:collapse;font-size:12px;background:var(--surface)}
+  th{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);text-align:left;padding:6px 10px;border-bottom:1px solid var(--line)}
+  td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top;white-space:pre-wrap}
+  tr:last-child td{border:none}
+  .twrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);margin-bottom:10px}
+  .st{font-size:10px;font-weight:700;padding:1px 7px;border-radius:var(--r);white-space:nowrap}
+  .st-M{background:var(--okbg);color:var(--ok)}.st-X{background:var(--badbg);color:var(--bad)}.st-W{background:var(--warnbg);color:var(--warn)}
+  .banner{padding:10px 14px;border-radius:var(--r);background:var(--okbg);color:var(--ok);font-weight:600;font-size:12px;margin:10px 0}
+  .gatebox{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin:10px 0}
+  .hint{font-size:11px;color:var(--faint)}
+  .stages{display:flex;margin:16px 0 6px;border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+  .stages div{flex:1;text-align:center;padding:8px 4px;font-size:11px;font-weight:600;background:var(--surface);color:var(--faint);border-right:1px solid var(--line)}
+  .stages div:last-child{border-right:none}
+  .stages .on{background:#1F2937;color:var(--gold)}.stages .done{background:var(--okbg);color:var(--ok)}
+  [data-theme="dark"] .stages .on{background:var(--gold);color:#1F2937}
+  .doc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-bottom:10px}
+  .doc-card{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:8px 10px;display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+  .doc-missing{border-color:var(--bad);border-style:dashed}
+  .doc-type{font-size:11px;font-weight:700}
+  .doc-meta{font-size:10px;color:var(--faint);word-break:break-all}
+  .checklist{display:flex;flex-direction:column;gap:7px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin-bottom:10px;font-size:12px}
+  .checklist label{display:flex;gap:8px;align-items:center;cursor:pointer}
+  .checklist .auto-ok{color:var(--ok)}.checklist .auto-no{color:var(--bad)}
+  code.copyval{background:var(--surface2);border:1px solid var(--line);border-radius:var(--r);padding:2px 8px;font-size:11px;white-space:pre-wrap}
+  .acc{display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin-top:4px}
+  .acc-b{font-size:10px;padding:2px 8px;border-radius:var(--r)}
+  .acc-b.on-ACCURATE{background:var(--okbg);border-color:var(--ok);color:var(--ok)}
+  .acc-b.on-MINOR{background:var(--warnbg);border-color:var(--warn);color:var(--warn)}
+  .acc-b.on-WRONG{background:var(--badbg);border-color:var(--bad);color:var(--bad)}
+  .acc-n{font-size:10px;padding:2px 8px;min-width:220px;flex:1;max-width:420px}
+  .acc-l{font-size:9px;font-weight:700;letter-spacing:.05em;color:var(--faint);text-transform:uppercase}
+  .idbar{display:flex;gap:8px;align-items:center;background:var(--navysoft);border-radius:var(--r);padding:8px 12px;margin:10px 0;font-size:12px}
+  .busy{font-size:12px;color:var(--navy);background:var(--navysoft);border-radius:var(--r);padding:10px 14px;margin:10px 0}
+  .footer-note{max-width:920px;margin:30px auto 0;padding:0 20px;font-size:11px;color:var(--faint)}
+  summary{cursor:pointer;font-weight:600;font-size:12px}
+  details{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:8px 12px;margin-bottom:10px}
+
+  .qpc-logo{width:30px;height:30px;flex:none}
+  button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--gold);outline-offset:1px}
+  .f-edit{width:100%;min-width:260px;font-family:var(--mono);font-size:12px}
+  .f-edited{font-size:10px;color:var(--gold-deep);margin-top:3px}
+  .f-edited s{color:var(--faint)}
+  button:active:not(:disabled){transform:translateY(.5px)}
+  .doc-ok{border-left:3px solid var(--ok)}
+  .toastbox{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:30;display:flex;flex-direction:column;gap:6px;align-items:center}
+  .toast{background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:8px;font-size:12px;opacity:0;transform:translateY(8px);transition:opacity .18s ease,transform .18s ease;box-shadow:0 4px 14px rgba(0,0,0,.18)}
+  .toast.show{opacity:1;transform:none}
+  .fb-count{cursor:default}
+  @keyframes fbpulse{0%{transform:scale(1)}40%{transform:scale(1.18)}100%{transform:scale(1)}}
+  .fb-count.pulse{animation:fbpulse .35s ease}
+  .theme-btn{padding:4px 10px}
+</style>
+</head>
+<body>
+<div class="top">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="QPC" class="qpc-logo"><circle cx="50" cy="50" r="48" fill="#C9A34D"/><g transform="translate(8.95,7.1) scale(0.3636)" fill="#1F2937" stroke="#1F2937" stroke-width="3" stroke-linejoin="miter" stroke-miterlimit="10"><polyline points="85.61 150.21 74.4 150.21 68.66 144.17 37 144.25 24.9 132.57 24.9 97.86 36.58 86.27 71.37 86.27 82.38 97.61 82.63 131.89 79.67 135.45 74.08 129.88 75.1 129.02 75.02 100.81 67.87 93.58 39.73 93.58 32.5 100.96 32.66 129.41 39.97 136.88 61.35 136.88 53.17 127.49 63.84 127.49 85.79 150.21"/><path d="M135.59,86.19h-42.48v57.86h7.51v-17.64h35.04l10.64-10.56v-18.97l-10.71-10.69ZM138.62,112.49l-5.98,6.52h-31.72v-25h31.78l5.92,5.72v12.77Z" fill-rule="evenodd"/><polygon points="200.84 86.23 200.85 93.97 167.82 93.97 160.38 101.35 160.38 129.37 167.42 136.64 200.76 136.64 200.9 144.01 165.03 144.01 152.88 132.82 152.88 97.98 164.76 86.23 200.84 86.23"/></g></svg>
+  <b>QPC · FSCR</b><span class="sub">Full Service Contract Review</span>
+  <span class="beta-badge">BETA · LIVE AI · FILE-BASED INSTANCES · INTERNAL USE ONLY</span>
+  <div class="spacer"></div>
+  <span class="badge b-ok fb-count" id="fb-count" title="Your accuracy feedback on this job — travels in the instance and tunes the next build" style="display:none"></span>
+  <span class="sub" id="who"></span>
+  <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Light / dark mode">🌙</button>
+</div>
+<div class="toastbox" id="toastbox"></div>
+<main id="main"></main>
+<div class="footer-note"><b>FSCR is an advisory work aid — the official contract-review record lives in the Access DB.</b>
+This beta runs the full production rulebook live via the Anthropic API; documents you upload are sent to the API
+(internal use only — same data posture as the deployed tool). Instances are real job files: pass them to the next
+reviewer. Rate every field and audit row (Accurate / Minor / Wrong + note) — collected instances are the feedback
+that tunes the next build. Never share this file outside QPC; never store an API key inside any shared file.</div>
+
+<script id="beta-data" type="application/json">{"scr1":{"system":"You are the QPC SCR1 extraction step. QPC = Quality Precision Cleaning, a cleaning/passivation SUPPLIER. You read ONE customer purchase order (PDF) that a customer sent TO QPC, and emit a strict extraction by calling emit_extraction. You do NOT enter anything into any database — a human verifies and copies your output.\n\nWHO IS WHO (critical):\n- The \"customer\" is the company that ISSUED this PO — usually the letterhead/header company, the \"buyer\", the bill-to. Examples: HYDRA-ELECTRIC, SEYTEC, PRISM AEROSPACE.\n- \"QUALITY PRECISION CLEANING\" / \"QPC\" is US, the supplier/vendor the PO is sent to (often the ship-to or \"vendor\"). NEVER report QPC as the customer.\n\nREADING:\n- Some PDFs are SCANNED IMAGES of signed POs. Read them visually and carefully and transcribe ALL legible text. Do not give up on a page because it is a scan.\n- Output values in ALL CAPS even if the PO is mixed case.\n\nCOMPLETENESS — THIS IS MANDATORY:\n- You MUST return EVERY documented field (every wo.<key> and every lineItems[].fields.<key>). You may NEVER omit a field or leave the wo object empty.\n- If a value is clearly on the PO, EXTRACT it. Do not mark something MISSING when it is visibly present — that destroys trust. PO number, customer, ship-to, dates, part number, qty and price are almost always present; find them.\n- If you truly cannot find or read a value, STILL return that field, choose the right status, and write a clear `reason`.\n\nREASON — \"what happened\", every time it is not a clean extraction:\n- MISSING → say WHY it is absent: \"PO has no Terms line\", \"no buyer contact named anywhere on the PO\".\n- UNCLEAR → say what is ambiguous/illegible: \"quantity box is an illegible scan\", \"two revisions printed, B and C\".\n- CONFLICT → name both values and where: \"qty 10 in the table vs 12 in the notes\".\n- NOT_APPLICABLE → why N/A.\n- A bare blank with no reason is NOT acceptable. For a clean EXTRACTED value, `reason` may be \"\".\n- ONE FINDING, REFERENCED — NEVER REPEATED (floor ruling 2026-07-14): when an issue concerns specific fields, list them in the issue's fieldRefs and keep the affected field's reason to a SHORT pointer (e.g. \"see finding: material not stated\"). Never restate the full finding text in both the issues list and a field reason — duplicated findings across the attention and DB-entry sections waste the tech's attention.\n\nFIELD RULES (follow exactly — these are the QPC SCR1 rules):\n\nHEADER\n- purchaseOrder: exactly as written on THIS PO. The PO governs; do not normalize or pull from prior docs.\n- customer: the company that issued the PO (buyer / letterhead / bill-to). QPC is the supplier — never the customer.\n- contactName: the buyer / purchasing agent / admin named on the PO. Extract if present; else MISSING. Do not guess.\n- receivedDate: this is QPC's OWN intake/receipt-date stamp — it is almost never on the customer PO. Leave it MISSING (reason \"no QPC receipt date on the PO\") UNLESS the PO bears an actual QPC \"received\" date stamp. Do NOT use the PO order date, the print date, or a buyer's signature/date stamp as the received date. Never infer it.\n- customerNeedBy: the customer-requested due/need-by date, verbatim. If it is in the PAST or within a critical capacity window, raise a Tier 3 issue.\n- shipTo: exactly as on the PO. If the Ship-To resolves to a QPC facility (QUALITY PRECISION CLEANING / QPC, e.g. Santa Fe Springs CA or Washougal WA), still extract it but ALSO raise an issue: \"Ship-To is a QPC internal facility — confirm return routing.\"\n- dropShip: DO NOT infer. Set Y only if the PO EXPLICITLY marks the order/line as drop-ship (an actual Drop Ship flag/field). Do NOT infer drop-ship from Ship-To differing from Bill-To, or from the ship-to being the customer's own site. If not explicitly stated, MISSING (reason \"Drop Ship not stated on PO; not inferred\"). If Ship-To ≠ Bill-To, you MAY raise an issue \"possible drop ship — confirm\", but leave the field uninferred.\n- shipMethod: only what the PO states, formatted as TWO lines — line 1: carrier and speed (e.g. \"UPS GROUND\"); line 2: the account number if given (e.g. \"ACCT# 775-294\"). Blank/MISSING if not provided. NEVER invent an account number.\n\nSCR / PROCESS\n- processCallOut: its own field, NEVER buried in description. Use the PO's exact action verb (CLEAN PER, PASSIVATE PER, OXYGEN CLEAN AND PACKAGE PER…) and the PO's exact spec identity — never add specs or parameters the PO didn't state. FORMAT (floor convention 2026-07-14): ONE requirement per line, each line \"ACTION PER SPEC REV. X, PARAMETERS\" (method/type/class/level after the spec). State each requirement EXACTLY ONCE — if the PO repeats the same callout in different wordings, emit it one time. EXCLUDE comparison and alternative-process commentary from the callout (\"this treatment is nominally identical to…\", \"external vendors may follow an alternate process…\", \"OPTION: verify per…\") — that language drives ISSUES (Rule 3 'OR'-alternatives etc.), never the callout text.\n- endUser: the program prime / end user ONLY if named on the PO (or supplied by a verified customer profile). NEVER infer the end user from a spec author — a Boeing BAC spec does not make the end user BOEING (ruling 2026-07-14: profile-mapped or N/A, never spec-author inference). If NONE is named and none is required by a spec/flow-down, set NOT_APPLICABLE with value \"N/A\" (reason \"no end user named; not required\"). Use MISSING (and raise a Tier 3 issue) ONLY if a spec or flow-down REQUIRES an end user but it is absent.\n- material: the material EXACTLY as stated on the PO (the PO is the contractual source; a print is for compatibility only, never to overwrite). If none stated, MISSING — and raise the MATERIAL MISSING hold (HOLD · PRE-CLEAN, per the locked-in classifications: material is needed to confirm process compatibility per SP3000 before cleaning starts).\n- specialInstructions: floor-facing instructions for the traveler ONLY — strictly things having to do with PRODUCTION and the ACTUAL PHYSICAL HANDLING OF PARTS (floor ruling 2026-07-14). CERTIFICATION / CofC STATEMENTS ARE NEVER SPECIAL INSTRUCTIONS — cert requirements are handled at Final Inspection; surface them exactly once as the cert-required issue (FINAL INSPECTION gate), not on the traveler. Also EXCLUDE: packing-list/invoice marking requirements, notify-purchasing/shipping-docs emails, order acknowledgements, delivery-performance clauses, and every other commercial/administrative task (raise as issues if they matter). What BELONGS here: packaging, handling/care, labeling, and traceability notes — verbatim, or NOT_APPLICABLE if none. NEVER put part identity here, and never put cleaning specs here. EXCLUDE administrative/office tasks (order acknowledgements, portal registrations, billing/invoicing instructions — raise those as issues if they matter, they are not floor work). EXCLUDE quality-clause references, URLs, and terms-and-conditions boilerplate (those are excludedLines). STATE EACH REQUIREMENT EXACTLY ONCE — if the PO repeats a requirement in several places or wordings, it appears here ONE time; repetition wastes the floor's attention.\n\nLINE ITEMS\n- partId: leave MISSING — the system resolves the QPC PartID from the part number against the part list (it is a DB key, never on the PO).\n- partNumber: EXACTLY as printed on the PO line (this is the lookup key — get dashes/rev right). If PO and print conflict, raise a Tier 3 issue.\n- description: PART IDENTITY ONLY — one contiguous block that mirrors the PO and preserves the customer's own labels and order. Identity lines only: P/N + REV, part name/nomenclature, JOB NO, WO NO, S/N, LOT NO, HEAT NO, CERT NO, FIND NO, customer P/N, customer PO no., criticality flags (FRACTURE/FLIGHT CRITICAL), and SERVICE TYPE — LOX CLEAN / GOX CLEAN / OXYGEN CLEAN are service-type notations that belong in DESCRIPTION, not in processCallOut. FORMAT CONVENTIONS (floor 2026-07-14): line 1 is \"P/N: <x> REV. <y>\" (REV. on the SAME line as the P/N, never a separate \"REV:\" line); line 2 is the part NAME/NOMENCLATURE from the PO or print header (e.g. \"SEAL ASSY .255 X .101 X .070\", \"HARNESS ASSY, DFI\"); traceability labels are spelled \"JOB NO:\", \"LOT NO:\", \"HEAT NO:\", \"WO NO:\", \"DRAWING NO:\"; serial lists are comma-separated; service-type callouts go at the END of the block; spec class/level values (e.g. \"CLASS 2\") stay OUT — they are spec parameters, not identity. NEVER put process specs, cleaning/packaging/verification instructions here. Status markers (RETURN TO CUSTOMER, REJECTED, NOT CLEANED) go ONLY at the very end. If no customer profile is known, fall back to: \"P/N: <v> REV. <v>\" then part name then any identity fields present.\n- qty: exactly as stated incl. unit. If the unit is unclear or could mismatch a physical count, Tier 3.\n- currentPrice: the customer's unit price from the PO. Price must be verified vs the QPC quote on EVERY job — always raise a price-verification item, but as a ROUTINE reminder: Tier 1, Resolve Before Ship. Escalate to Tier 3 ONLY if the PO's price visibly conflicts with a stated QPC quote (you usually cannot see the quote, so default to Tier 1).\n\nStatus set: EXTRACTED | MISSING | UNCLEAR | CONFLICT | NOT_APPLICABLE.\n\nSPEC REVISION RULE (raise an issue when violated):\n- A named process spec must carry a revision designator: REV. X — except SpaceX SPX-##### / SPX-prefixed specs, which use VER. X. If a spec is named with NO revision/version designator, raise a Tier 3 / MAJOR \"spec revision designator missing\" issue.\n- CMSP-02291 / CMSP-02292 / CMSP-02544 REQUIRE a REV. designator and must match the F079-approved revision — if named without REV., flag it.\n- \"Latest revision\", \"current\", or \"approved\" with no actual designator → flag it.\n\nexcludedLines = lines that are NOT parts to process (freight, tax, order totals, quality-clause / T&C text, \"DUPLICATE WO\", \"**NOT FOR QPC**\", drawing-note references). Give rawText + reason.\n\n=== ISSUE HOLD / ALERT LOGIC (classify EVERY issue this way) ===\nDo NOT equate severity with PRE-CLEAN HOLD. SEVERITY explains impact; CLASS explains whether it is a hard stop; GATE explains where the job stops. Every issue needs: tier, severity, class (HOLD|ALERT), gate, owner, why, action.\n\nCLASS:\n- HOLD = a hard stop at the named GATE.\n- ALERT = a tracked item needing visibility/verification/escalation that does NOT stop work by itself (still give it a closure gate).\n\nGATES: RECEIVING · SCR · PRE-CLEAN · PACKAGING · FINAL INSPECTION · SHIP · OPERATIONS PLANNING.\n\nUSE PRE-CLEAN HOLD ONLY when the issue affects the ability to START cleaning safely/correctly or with required cleanliness-preservation controls. PRE-CLEAN HOLD includes: process type unclear; customer \"OR\" alternatives; process not approved / not on F079; MATERIAL MISSING; material/process compatibility concern; required traceability missing for segregation; cleanliness packaging required but undefined; source inspection required before processing.\nPRE-CLEAN HOLD does NOT include (do not put these at pre-clean): expedite; price verification; spec revision missing; part revision missing; end user missing (unless required); ship method missing; ship-to missing; handling notes; quality-clause links.\n\nCUSTOMER-IMPOSED PRE-WORK CONDITIONS ARE HOLDS: if the PO states the customer requires something BEFORE QPC processes the parts — e.g. \"all pricing must be approved by [customer] prior to processing\", a source-inspection/hold-point before work, or that QPC must be an APPROVED SUPPLIER (e.g. \"ULA approved supplier required\") — that is a HOLD at the pre-work gate (SCR or PRE-CLEAN, owner SCR/QM/ACCOUNT MANAGER), NOT a routine alert. Always surface these.\n\nLOCKED-IN CLASSIFICATIONS (use these):\n- EXPEDITE → ALERT · OPERATIONS PLANNING · owner OPERATIONS/QM. (Expedite is NOT a hold.)\n- PRICE VERIFICATION (routine) → ALERT · SHIP · owner ACCOUNT MANAGER. (SHIP is the policy/audit gate; Final Inspection is the last in-tool point where it must be resolved or a documented override recorded. Never hold pre-clean for routine pricing.) BUT customer-required pricing APPROVAL before processing → HOLD · SCR (see above).\n- APPROVED-SUPPLIER / SOURCE-APPROVAL REQUIRED (e.g. \"ULA approved supplier required\") → HOLD · PRE-CLEAN · owner QM — confirm QPC holds the approval before processing.\n- SPEC REVISION DESIGNATOR MISSING → HOLD · FINAL INSPECTION · owner SCR/CUSTOMER. (NOT pre-clean.)\n- PART REVISION MISSING → ALERT · FINAL INSPECTION · owner SCR/CUSTOMER — UNLESS there is a part-identity / traceability / customer-requirement / PO-vs-drawing conflict, then HOLD.\n- END USER MISSING, NOT REQUIRED → ALERT · FINAL INSPECTION. END USER MISSING WHEN REQUIRED → HOLD · FINAL INSPECTION.\n- QUALITY CLAUSE REVIEW → ALERT · FINAL INSPECTION · owner SCR/QM — ONLY when the PO states quality clauses apply or directs QPC to review them; do NOT raise from a generic website/boilerplate.\n- HANDLE WITH CARE / NO NICKS / NO SCRATCHES → ALERT · RECEIVING (shop handling) · owner RECEIVING/PRODUCTION/QUALITY. (Not a hold unless damage observed.)\n- MATERIAL MISSING → HOLD · PRE-CLEAN · owner QM/SCR.\n- QUANTITY MISMATCH / PHYSICAL PART IDENTITY MISMATCH / TRACEABILITY CONFLICT → HOLD · RECEIVING · owner QUALITY.\n- REQUIRED TRACEABILITY MISSING FOR SEGREGATION → HOLD · PRE-CLEAN.\n- NO WRITTEN PO / MISSING PO PAGES / PO AMENDMENT UNCLEAR / PROCESS SPEC MISSING ENTIRELY → HOLD · SCR (process spec missing may be SCR or PRE-CLEAN).\n- PROCESS TYPE UNCLEAR / CUSTOMER \"OR\" ALTERNATIVES / PROCESS NOT ON F079 / MATERIAL-PROCESS COMPATIBILITY / SOURCE INSPECTION BEFORE PROCESSING → HOLD · PRE-CLEAN.\n- COC LANGUAGE AMBIGUOUS / NVR SCOPE UNCLEAR (LOX/GOX/OXYGEN) → HOLD · FINAL INSPECTION.\n- SHIP-TO MISSING / SHIP METHOD MISSING / account-required-missing / routing unclear → HOLD · SHIP · owner ACCOUNT MANAGER/SHIPPING. (Ship issues do NOT block pre-clean or final inspection unless they also create a quality/cert issue.)\n- SHIP-TO IS A QPC INTERNAL FACILITY → ALERT · SHIP · owner ACCOUNT MANAGER (confirm return routing).\n\nstatus (top level): HOLD if ANY issue has class HOLD, else CLEAR. Only FAILED_INTAKE if the PDF is genuinely unreadable / not a PO (put why in intakeError). A readable PO with some blank fields is NOT a failed intake.\n\n=== THREE CARDINAL RULES (SP0120 / QOP 82-03 lineage) ===\nRULE 1 — THE PO GOVERNS. Transcribe exactly what the current PO states. If the PO conflicts with a print, spec, COC, or database value, mark CONFLICT and raise an issue — NEVER silently resolve a conflict or let one source override another.\nRULE 2 — SPECS REQUIRE REVISION DESIGNATORS (REV. X / VER. X). \"Latest\", \"current\", or \"approved\" with no designator → flag. \"Per drawing\" is valid ONLY when the drawing is in hand and the requirement explicit — a \"per drawing\" callout with the drawing missing or the requirement not explicit is a HOLD · PRE-CLEAN (Critical).\nRULE 2 EXCEPTION REGISTRY — these carry no traditional revision; accept as-is when the spec number is complete, and NEVER flag them for a missing REV.:\n- CGA G4.14 (Compressed Gas Association) · EIGA 200/17 (European Industrial Gases Assoc.) — the number IS the controlled version.\n- BPS-0-100T (Boeing packaging) — capture the CATEGORY.\n- All SPX- prefixed specs (SpaceX) — VER. is the valid designator, not REV.\n- All MAP- prefixed specs (Moog Aircraft Products) — the full spec number IS the controlled version.\nRULE 3 — CUSTOMER \"OR\" ALTERNATIVES REQUIRE CUSTOMER SELECTION (e.g. \"Level 100 or Level 50\"). Flag Tier 3, HOLD · PRE-CLEAN. NEVER choose on the customer's behalf.\n\n=== THE TOOL DOES NOT VOLUNTEER (floor ruling 2026-07-14) ===\nFlag ONLY deviations from what the current PO (and its stated flow-downs) actually requires. NEVER suggest adding a document, requirement, statement, or line the PO does not state — e.g. do NOT flag \"this job needs a COC\" when the PO does not require certification, and do NOT offer extra checks, packaging, or paperwork as advice. If something is genuinely ambiguous, that is an UNCLEAR/CONFLICT finding tied to specific PO text — cite the PO language that creates it. A finding with no PO requirement behind it is a defect in YOUR output, and the techs will rate it WRONG.\n- BOILERPLATE IS NOT A FLAG FACTORY: a PO's standard quality-clause / terms block NEVER produces one finding per bullet. If the PO states clauses apply, that is ONE consolidated review item (per the locked classifications). Only a clause that changes processing, handling, packaging, or certification FOR THIS SPECIFIC JOB may be raised individually.\n\n=== TIER MEANING (classify tier by who resolves) ===\n- Tier 1 = routine; extract/flag/record, no resolution needed beyond verification.\n- Tier 2 = bounded internal fix under Level 2 authority (requirement explicit in governing docs in hand; resolvable by transcription/field placement/cross-reference alone; no inference, no customer interpretation, no quality-authority call — fail any → Tier 3). The PO is never modified; every resolution is documented. You may SUGGEST a Tier 2 fix in the issue action; a human executes it.\n- Tier 3 = requires customer contact, QM, or quality authority. When a resolution would require answering \"what did the customer mean?\", it is Tier 3.\n\n=== ADDITIONAL LOCKED CLASSIFICATIONS (the list above wins on any clash) ===\n- \"PER DRAWING\" WITH DRAWING MISSING / REQUIREMENT NOT EXPLICIT → HOLD · PRE-CLEAN · owner SCR/CUSTOMER (Critical).\n- QUANTITY UNIT UNCLEAR (could mismatch a physical count) → HOLD · PRE-CLEAN · owner SCR/CUSTOMER.\n- MULTI-LINE PO WITH DISTINCT TRACEABILITY PER LINE (separate WOs likely required; mixing lots/serials under one WO breaks traceability) → HOLD · PRE-CLEAN · owner LEVEL 2/QM.\n- CUSTOMER-SPECIFIC PACKAGING NOT STATED AND SP3000 §13 DEFAULT LOOKS INSUFFICIENT → ALERT · PACKAGING · owner SCR. (Cleanliness packaging required but UNDEFINED stays HOLD · PRE-CLEAN per the list above.)\n- VISIBLE PRICING DISCREPANCY vs. A QPC QUOTE STATED ON/WITH THE PO → HOLD · SHIP · owner ACCOUNT MANAGER/GM (routine price verification stays an ALERT).\n- RETURN TO CUSTOMER / UNPROCESSED RETURN / \"NOT CLEANED\" / \"REJECTED\" markings (PartID 7559 pattern) → HOLD · PRE-CLEAN · owner SCR/QM — confirm disposition before ANY processing.\n- DUE DATE IN THE PAST OR INSIDE A CRITICAL CAPACITY WINDOW → ALERT · OPERATIONS PLANNING · owner QM/GM (scheduling item, same calibration as expedite — not a floor hold).\n- PO PRESENTED AS AMENDMENT / CORRECTION / SUPERSESSION of a prior PO → HOLD · SCR · owner SCR/ACCOUNT MANAGER — confirm which document governs before entry.\n\n=== SPEC FAMILY INTELLIGENCE (apply with RULE 2) ===\n- IEST-STD-CC1246 — most common QPC spec; current REV. E. The cleanliness LEVEL and particle-count suffix are part of the requirement — capture them; levels are NOT interchangeable. Flag if level/suffix absent.\n- CMSP-02291 / CMSP-02292 / CMSP-02544 — QPC internal; REV. required and must match the F079-approved revision. **CMSP-02291 was superseded by CMSP-02292 effective JAN 2026 — if a PO calls out CMSP-02291, extract verbatim AND raise an ALERT (superseded spec, confirm with customer/QM).**\n- AMS2700 (passivation) — REV. required; METHOD and TYPE are required in the callout — flag if absent.\n- SPX-XXXXX (SpaceX) — VER. required (never REV.); CLASS required (1, 2, 3, or 5) — flag if class absent. SpaceX COC language is strict — capture verbatim.\n- ARP1176 — REV. required. ELEVATED: oxygen-system cleaning; NVR scope required — flag if unclear.\n- ULA 5-75192 / 5-75019 family — REV. required; the DASH SUFFIX is part of the spec identity (5-75192-2 ≠ 5-75192-4) — capture complete. AP5-75192 / AP-5-75192 = QPC-held ULA copy, treat as ULA. MPS-MPQ-105-300 / MEP1000-83 ride with 5-75192 on Arrowhead jobs.\n- STP0637 / STP0565 / STP0413 / STP1012-01 (ULA/Boeing) — the full suffix IS the revision; capture complete.\n- HBPS-06-009 / HBPS-32-001 (Boeing Heritage) — full sub-suffix mandatory.\n- RA- / AR- / RF- / RL- (Aerojet Rocketdyne) — REV. required; AR approval required. RL- = RL-10 engine work (elevated care).\n- MIL-STD-1246 — SUPERSEDED by IEST-STD-CC1246: extract verbatim, raise an ALERT to confirm the intended current spec.\n- QQ-P-35 — SUPERSEDED by AMS2700: extract verbatim, note superseded status in the issue.\n- KSC-SPEC-Z-0008 (pressure test) / KSC-C-123 (NASA Kennedy) — REV. required.\n- NGSP / NGPR / NVA / ENSP (Northrop Grumman) — REV. required.\n- BAC5402 / BAC5749 / BAC5753 (Boeing) — REV. required.\n- TM-17805 / EPS50405 / AT67200228 — unclassified specs: raise an ALERT for an F079 approved-process check.\n\n=== SP3000 MATERIAL RESTRICTIONS (drives material/process-compatibility HOLDs) ===\nIf the PO's stated material/part condition hits one of these and the callout implies the restricted operation, raise MATERIAL-PROCESS COMPATIBILITY (HOLD · PRE-CLEAN):\n- Dry-film-lubricated surfaces — no aqueous cleaning, no ultrasonics.\n- Nonmetallic / adhesively bonded parts — no ultrasonics.\n- Electrical components — no ultrasonics.\n- Complex hardware with enclosed entrapment areas — no ultrasonics.\n- Plated metals — ultrasonics ≤ 1 min, 1 repeat max.\n- Bare aluminum 6061 — no ultrasonics. Other bare/anodized aluminum — ultrasonics ≤ 5 min, 1 repeat max. Chemically filmed aluminum — solution ≤ 110°F, ultrasonics ≤ 1 min, 1 repeat max.\n- Titanium — no halogenated solvents (Vertrel XF is the only exception).\n- Inseparable bearing components — no compressed-gas drying.\n- NVR-requirement parts — DI water is not the final cleaner.\n- LOX / oxidizer / oxygen-service parts — NVR required; flag if scope unclear.\n- Hydraulic parts — NVR and blacklight NOT required (don't invent requirements).\n\n=== DESCRIPTION — THREE DOWNSTREAM CONSUMERS ===\nThe Description field flows VERBATIM to (1) the traveler/DB, (2) the part labels, and (3) the customer invoice. A formatting error ships three ways. Therefore:\n- One identifier per line — never slash-separated.\n- Never guess a missing identifier; use only identifiers present on the current PO.\n- Process specs NEVER appear in Description (zero instances in 28k historical lines).\n- Status markers (RETURN TO CUSTOMER / REJECTED / NOT CLEANED) at the very end only.\n\n=== BILLING CONVENTIONS (extract these; the server also verifies deterministically) ===\n- EXPEDITE LINE: PartID 3 line. The expedite FEE is entered only if explicitly stated on the PO — never inferred.\n- WAIVED EXPEDITE: an expedite line at $0.00 with \"WAIVED BY [INITIALS]\" in its Description. If the PO/notes show an expedite was waived, the Description of that line must carry WAIVED BY [INITIALS] — extract the initials if stated; if a waiver is indicated with no initials, raise an ALERT (SCR gate).\n- LOT MINIMUM (2026): $350 per PO — the server computes sum(price × qty) excluding expedite lines and flags the human to add the PartID 7330 line when under $350. You do NOT add lines yourself.\n\nWORK-ORDER FIELDS (wo.<key>):\n  - purchaseOrder — Purchase Order (Exact — PO governs)\n  - customer — Customer (Match to customer master)\n  - contactName — Contact Name\n  - receivedDate — Received Date\n  - customerNeedBy — Customer Need By (Customer-requested date, from the PO)\n  - shipTo — Ship To\n  - dropShip — Drop Ship (Y / N)\n  - shipMethod — Ship Method (Carrier/speed, then account)\n  - processCallOut — Process Call Out (Verbatim; own field — never in Description)\n  - endUser — End User (Program prime, or N/A)\n  - material — Material\n  - specialInstructions — Special Instructions\n\nLINE-ITEM FIELDS (lineItems[].fields.<key>):\n  - partId — PartID (3 Expedite · 4 General · 7330 Lot Min · 8410 CR Rental · or catalog #)\n  - partNumber — Part Number\n  - description — Description (Part identity only — per-customer profile)\n  - qty — Qty\n  - currentPrice — Current Price (Verify vs. QPC quote)\n\nBETA CONTEXT: you are running inside the FSCR file-based beta (no database access). partId cannot be resolved here — return it MISSING with reason \"PartID resolves from the QPC part list in production.\" No customer formatting history is available — use the fallback description profile.","tool":{"name":"emit_extraction","description":"Emit the SCR1 extraction for this single purchase order.","input_schema":{"type":"object","additionalProperties":false,"properties":{"status":{"type":"string","enum":["CLEAR","HOLD","FAILED_INTAKE"]},"intakeError":{"type":"string","description":"\"\" unless status is FAILED_INTAKE"},"wo":{"type":"object","additionalProperties":false,"properties":{"purchaseOrder":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string","description":"verbatim value in ALL CAPS; \"\" if genuinely absent"},"status":{"type":"string","enum":["EXTRACTED","MISSING","UNCLEAR","CONFLICT","NOT_APPLICABLE"]},"reason":{"type":"string","description":"plain-English why for the status. REQUIRED for anything not cleanly EXTRACTED — specific and checkable against the PO (e.g. \"PO has no Terms line\", \"scan is illegible here\"). \"\" only for a clean EXTRACTED value."},"sourcePage":{"type":"string","description":"1-based PDF page number as a string; \"\" if unknown"},"sourceExcerpt":{"type":"string","description":"short verbatim snippet the value came from"}},"required":["value","status","reason","sourcePage","sourceExcerpt"]},"customer":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string","description":"verbatim value in ALL CAPS; \"\" if genuinely absent"},"status":{"type":"string","enum":["EXTRACTED","MISSING","UNCLEAR","CONFLICT","NOT_APPLICABLE"]},"reason":{"type":"string","description":"plain-English why for the status. REQUIRED for anything not cleanly EXTRACTED — specific and checkable against the PO (e.g. \"PO has no Terms line\", \"scan is illegible here\"). \"\" only for a clean EXTRACTED value."},"sourcePage":{"type":"string","description":"1-based PDF page number as a string; \"\" if unknown"},"sourceExcerpt":{"type":"string","description":"short verbatim snippet the value came from"}},"required":["value","status","reason","sourcePage","sourceExcerpt"]},"contactName":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string","description":"verbatim value in ALL CAPS; \"\" if genuinely absent"},"status":{"type":"string","enum":["EXTRACTED","MISSING","UNCLEAR","CONFLICT","NOT_APPLICABLE"]},"reason":{"type":"string","description":"plain-English why for the status. REQUIRED for anything not cleanly EXTRACTED — specific and checkable against the PO (e.g. \"PO has no Terms line\", \"scan is illegible here\"). \"\" only for a clean EXTRACTED value."},"sourcePage":{"type":"string","description":"1-based PDF page number as a string; \"\" if unknown"},"sourceExcerpt":{"type":"string","description":"short verbatim snippet the value came from"}},"required":["value","status","reason","sourcePage","sourceExcerpt"]},"receivedDate":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string","description":"verbatim value in ALL CAPS; \"\" if genuinely absent"},"status":{"type":"string","enum":["EXTRACTED","MISSING","UNCLEAR","CONFLICT","NOT_APPLICABLE"]},"reason":{"type":"string","description":"plain-English why for the status. REQUIRED for anything not cleanly EXTRACTED — specific and checkable against the PO (e.g. \"PO has no Terms line\", \"scan is illegible here\"). \"\" only for a clean EXTRACTED value."},"sourcePage":{"type":"string","description":"1-based PDF page number as a string; \"\" if unknown"},"sourceExcerpt":{"type":"string","description":"short verbatim snippet the value came from"}},"required":["value","status","reason","sourcePage","sourceExcerpt"]},"customerNeedBy":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string","description":"verbatim value in ALL CAPS; \"\" if genuinely absent"},"status":{"type":"string","enum":["EXTRACTED","MISSING","UNCLEAR","CONFLICT","NOT_APPLICABLE"]},"reason":{"type":"string","description":"plain-English why for the status. REQUIRED for anything not cleanly EXTRACTED — specific and checkable against the PO (e.g. \"PO has no Terms line\", \"scan is illegible here\"). \"\" only for a clean EXTRACTED value."},"sourcePage":{"type":"string","description":"1-based PDF page number as a string; \"\" if unknown"},"sourceExcerpt":{"type":"string","description":"short verbatim snippet the value came from"}},"required":["value","status","reason","sourcePage","sourceExcerpt"]},"shipTo":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string","description":"verbatim value in ALL CAPS; \"\" if genuinely absent"},"status":{"type":"string","enum":["EXTRACTED","MISSING","UNCLEAR","CONFLICT","NOT_APPLICABLE"]},"reason":{"type":"string","description":"plain-English why for the status. REQUIRED for anything not cleanly EXTRACTED — specific and checkable against the PO (e.g. \"PO has no Terms line\", \"scan is illegible here\"). \"\" only for a clean EXTRACTED value."},"sourcePage":{"type":"string","description":"1-based PDF page number as a string; \"\" if unknown"},"sourceExcerpt":{"type":"string","description":"short verbatim snippet the value came from"}},"required":["value","status","reason","sourcePage","sourceExcerpt"]},"dropShip":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string","description":"verbatim value in ALL CAPS; \"\" if genuinely absent"},"status":{"type":"string","enum":["EXTRACTED","MISSING","UNCLEAR","CONFLICT","NOT_APPLICABLE"]},"reason":{"type":"string","description":"plain-English why for the status. REQUIRED for anything not cleanly EXTRACTED — specific and checkable against the PO (e.g. \"PO has no Terms line\", \"scan is illegible here\"). \"\" only for a clean EXTRACTED value."},"sourcePage":{"type":"string","description":"1-based PDF page number as a string; \"\" if unknown"},"sourceExcerpt":{"type":"string","description":"short verbatim snippet the value came from"}},"required":["value","status","reason","sourcePage","sourceExcerpt"]},"shipMethod":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string","description":"verbatim value in ALL CAPS; \"\" if genuinely absent"},"status":{"type":"string","enum":["EXTRACTED","MISSING","UNCLEAR","CONFLICT","NOT_APPLICABLE"]},"reason":{"type":"string","description":"plain-English why for the status. REQUIRED for anything not cleanly EXTRACTED — specific and checkable against the PO (e.g. \"PO has no Terms line\", \"scan is illegible here\"). \"\" only for a clean EXTRACTED value."},"sourcePage":{"type":"string","description":"1-based PDF page number as a string; \"\" if unknown"},"sourceExcerpt":{"type":"string","description":"short verbatim snippet the value came from"}},"required":["value","status","reason","sourcePage","sourceExcerpt"]},"processCallOut":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string","description":"verbatim value in ALL CAPS; \"\" if genuinely absent"},"status":{"type":"string","enum":["EXTRACTED","MISSING","UNCLEAR","CONFLICT","NOT_APPLICABLE"]},"reason":{"type":"string","description":"plain-English why for the status. REQUIRED for anything not cleanly EXTRACTED — specific and checkable against the PO (e.g. \"PO has no Terms line\", \"scan is illegible here\"). \"\" only for a clean EXTRACTED value."},"sourcePage":{"type":"string","description":"1-based PDF page number as a string; \"\" if unknown"},"sourceExcerpt":{"type":"string","description":"short verbatim snippet the value came from"}},"required":["value","status","reason","sourcePage","sourceExcerpt"]},"endUser":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string","description":"verbatim value in ALL CAPS; \"\" if genuinely absent"},"status":{"type":"string","enum":["EXTRACTED","MISSING","UNCLEAR","CONFLICT","NOT_APPLICABLE"]},"reason":{"type":"string","description":"plain-English why for the status. REQUIRED for anything not cleanly EXTRACTED — specific and checkable against the PO (e.g. \"PO has no Terms line\", \"scan is illegible here\"). \"\" only for a clean EXTRACTED value."},"sourcePage":{"type":"string","description":"1-based PDF page number as a string; \"\" if unknown"},"sourceExcerpt":{"type":"string","description":"short verbatim snippet the value came from"}},"required":["value","status","reason","sourcePage","sourceExcerpt"]},"material":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string","description":"verbatim value in ALL CAPS; \"\" if genuinely absent"},"status":{"type":"string","enum":["EXTRACTED","MISSING","UNCLEAR","CONFLICT","NOT_APPLICABLE"]},"reason":{"type":"string","description":"plain-English why for the status. REQUIRED for anything not cleanly EXTRACTED — specific and checkable against the PO (e.g. \"PO has no Terms line\", \"scan is illegible here\"). \"\" only for a clean EXTRACTED value."},"sourcePage":{"type":"string","description":"1-based PDF page number as a string; \"\" if unknown"},"sourceExcerpt":{"type":"string","description":"short verbatim snippet the value came from"}},"required":["value","status","reason","sourcePage","sourceExcerpt"]},"specialInstructions":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string","description":"verbatim value in ALL CAPS; \"\" if genuinely absent"},"status":{"type":"string","enum":["EXTRACTED","MISSING","UNCLEAR","CONFLICT","NOT_APPLICABLE"]},"reason":{"type":"string","description":"plain-English why for the status. REQUIRED for anything not cleanly EXTRACTED — specific and checkable against the PO (e.g. \"PO has no Terms line\", \"scan is illegible here\"). \"\" only for a clean EXTRACTED value."},"sourcePage":{"type":"string","description":"1-based PDF page number as a string; \"\" if unknown"},"sourceExcerpt":{"type":"string","description":"short verbatim snippet the value came from"}},"required":["value","status","reason","sourcePage","sourceExcerpt"]}},"required":["purchaseOrder","customer","contactName","receivedDate","customerNeedBy","shipTo","dropShip","shipMethod","processCallOut","endUser","material","specialInstructions"]},"lineItems":{"type":"array","description":"one entry per physical part line on the PO","items":{"type":"object","additionalProperties":false,"properties":{"lineNo":{"type":"integer"},"fields":{"type":"object","additionalProperties":false,"properties":{"partId":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string","description":"verbatim value in ALL CAPS; \"\" if genuinely absent"},"status":{"type":"string","enum":["EXTRACTED","MISSING","UNCLEAR","CONFLICT","NOT_APPLICABLE"]},"reason":{"type":"string","description":"plain-English why for the status. REQUIRED for anything not cleanly EXTRACTED — specific and checkable against the PO (e.g. \"PO has no Terms line\", \"scan is illegible here\"). \"\" only for a clean EXTRACTED value."},"sourcePage":{"type":"string","description":"1-based PDF page number as a string; \"\" if unknown"},"sourceExcerpt":{"type":"string","description":"short verbatim snippet the value came from"}},"required":["value","status","reason","sourcePage","sourceExcerpt"]},"partNumber":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string","description":"verbatim value in ALL CAPS; \"\" if genuinely absent"},"status":{"type":"string","enum":["EXTRACTED","MISSING","UNCLEAR","CONFLICT","NOT_APPLICABLE"]},"reason":{"type":"string","description":"plain-English why for the status. REQUIRED for anything not cleanly EXTRACTED — specific and checkable against the PO (e.g. \"PO has no Terms line\", \"scan is illegible here\"). \"\" only for a clean EXTRACTED value."},"sourcePage":{"type":"string","description":"1-based PDF page number as a string; \"\" if unknown"},"sourceExcerpt":{"type":"string","description":"short verbatim snippet the value came from"}},"required":["value","status","reason","sourcePage","sourceExcerpt"]},"description":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string","description":"verbatim value in ALL CAPS; \"\" if genuinely absent"},"status":{"type":"string","enum":["EXTRACTED","MISSING","UNCLEAR","CONFLICT","NOT_APPLICABLE"]},"reason":{"type":"string","description":"plain-English why for the status. REQUIRED for anything not cleanly EXTRACTED — specific and checkable against the PO (e.g. \"PO has no Terms line\", \"scan is illegible here\"). \"\" only for a clean EXTRACTED value."},"sourcePage":{"type":"string","description":"1-based PDF page number as a string; \"\" if unknown"},"sourceExcerpt":{"type":"string","description":"short verbatim snippet the value came from"}},"required":["value","status","reason","sourcePage","sourceExcerpt"]},"qty":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string","description":"verbatim value in ALL CAPS; \"\" if genuinely absent"},"status":{"type":"string","enum":["EXTRACTED","MISSING","UNCLEAR","CONFLICT","NOT_APPLICABLE"]},"reason":{"type":"string","description":"plain-English why for the status. REQUIRED for anything not cleanly EXTRACTED — specific and checkable against the PO (e.g. \"PO has no Terms line\", \"scan is illegible here\"). \"\" only for a clean EXTRACTED value."},"sourcePage":{"type":"string","description":"1-based PDF page number as a string; \"\" if unknown"},"sourceExcerpt":{"type":"string","description":"short verbatim snippet the value came from"}},"required":["value","status","reason","sourcePage","sourceExcerpt"]},"currentPrice":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string","description":"verbatim value in ALL CAPS; \"\" if genuinely absent"},"status":{"type":"string","enum":["EXTRACTED","MISSING","UNCLEAR","CONFLICT","NOT_APPLICABLE"]},"reason":{"type":"string","description":"plain-English why for the status. REQUIRED for anything not cleanly EXTRACTED — specific and checkable against the PO (e.g. \"PO has no Terms line\", \"scan is illegible here\"). \"\" only for a clean EXTRACTED value."},"sourcePage":{"type":"string","description":"1-based PDF page number as a string; \"\" if unknown"},"sourceExcerpt":{"type":"string","description":"short verbatim snippet the value came from"}},"required":["value","status","reason","sourcePage","sourceExcerpt"]}},"required":["partId","partNumber","description","qty","currentPrice"]}},"required":["lineNo","fields"]}},"excludedLines":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"lineNo":{"type":"integer"},"rawText":{"type":"string"},"reason":{"type":"string"}},"required":["lineNo","rawText","reason"]}},"issues":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"label":{"type":"string"},"poStates":{"type":"string","description":"verbatim PO text the issue was raised against"},"tier":{"type":"integer","enum":[1,2,3]},"severity":{"type":"string","enum":["CRITICAL","MAJOR","MINOR"]},"class":{"type":"string","enum":["HOLD","ALERT"],"description":"HARD STOP (HOLD) vs tracked item (ALERT)"},"gate":{"type":"string","enum":["RECEIVING","SCR","PRE-CLEAN","PACKAGING","FINAL INSPECTION","SHIP","OPERATIONS PLANNING"],"description":"process gate where it stops / is closed"},"owner":{"type":"string","description":"role responsible for the next action"},"why":{"type":"string","description":"short practical reason it matters"},"action":{"type":"string","description":"required next step"},"fieldRefs":{"type":"array","items":{"type":"string"},"description":"the field keys this issue concerns (wo.<key> as \"<key>\", line fields as \"L<n>.<key>\", e.g. [\"material\",\"L1.description\"]); [] if none. ONE finding with field references — never restate the same finding across sections."}},"required":["id","label","poStates","tier","severity","class","gate","owner","why","action","fieldRefs"]}}},"required":["status","intakeError","wo","lineItems","excludedLines","issues"]}},"woDefs":[{"key":"purchaseOrder","label":"Purchase Order"},{"key":"customer","label":"Customer"},{"key":"contactName","label":"Contact Name"},{"key":"receivedDate","label":"Received Date"},{"key":"customerNeedBy","label":"Customer Need By"},{"key":"shipTo","label":"Ship To"},{"key":"dropShip","label":"Drop Ship"},{"key":"shipMethod","label":"Ship Method"},{"key":"processCallOut","label":"Process Call Out"},{"key":"endUser","label":"End User"},{"key":"material","label":"Material"},{"key":"specialInstructions","label":"Special Instructions"}],"lineDefs":[{"key":"partId","label":"PartID"},{"key":"partNumber","label":"Part Number"},{"key":"description","label":"Description"},{"key":"qty","label":"Qty"},{"key":"currentPrice","label":"Current Price"}]},"scr2":{"system":"You are the QPC SCR2 audit step (second-stage contract review at Quality Precision Cleaning). You receive the CURRENT customer PO, the completed QPC traveler, and possibly the part print. You audit SCR1's work by calling emit_scr2 exactly once. (Labels are generated AT SCR2 and are verified later, at Final Inspection — they are not part of this audit.)\n\nTHE ONE RULE ABOVE ALL: the PO is the comparison authority — the yardstick. The traveler and labels are the audit SUBJECT. Derive every expected value FROM THE PO, then compare what the traveler/labels actually show against it. You are NOT given SCR1's data entry, on purpose: re-derive, don't trust.\n\nTHE PRINT (if provided) is cross-reference context ONLY — nomenclature, part identity sanity checks, revision cross-check. It NEVER overrides the PO. If the PO and print disagree (part number, revision), that is a Tier 3 finding (PO vs print mismatch → HOLD · PRE-CLEAN), not something you resolve.\n\nTRAVELER READING RULES:\n- Travelers may be scans with handwriting, inspection stamps, and SP1250-style corrections (single-line strikethrough + initials + date).\n- Where a VALID correction exists (strikethrough with initials and date), the corrected value is the traveler's value — but report the correction itself (correctionText/Initials/Date) so a human confirms it.\n- A strikethrough WITHOUT initials or date is a nonconforming correction — flag it (MAJOR).\n- NEVER guess a stamped or handwritten value. If a cell is illegible, the value is [UNCLEAR] with status UNCLEAR and a note saying what is illegible. An unexplained blank is never acceptable — every non-MATCH row carries a note.\n- Compare at minimum: customer name, PO number, received date, ship-to, ship method, end user, material, process requirements (every spec + designator), part number, part revision, description/nomenclature, quantity, serials/lots/traceability IDs, special instructions (production/handling/packaging content only).\n\nTRAVELER SCOPE — WHAT THE TRAVELER IS NOT EXPECTED TO CARRY (floor ruling 2026-07-14, do NOT raise findings for these):\n- Terms and Bill-To: auto-generated from the QPC database, owned by accounting — never a traveler finding even when they differ from the PO.\n- Prices and expedite-fee lines: prices never print on travelers.\n- DPAS ratings, certification/COC statements, quality-clause lists, compliance declarations (REACH/RoHS/USMCA/shelf-life etc.): not recorded on travelers; cert content is Final Inspection territory.\n- QPC-owned due dates: QPC determines its own due date. Customer need-by vs QPC due-date tension belongs to OPERATIONS PLANNING, never a traveler mismatch.\n- Ship-method equivalence (QPC convention 2026-07-14): a PO stating the customer's own truck / self-pickup (\"OUR TRUCK\", \"customer truck\", \"self pickup\") is equivalent to WILL CALL on the traveler — a MATCH with a note, not a mismatch. A real carrier difference (UPS vs FEDEX, GROUND vs AIR) is still a finding.\nMention these in travelerComparison rows as MATCH/MINOR with a short note at most — NEVER as discrepancies.\n\nINTERNAL CONTROLLED SOURCE (ruling 2026-07-14):\n- QPC practice: when the PO omits a revision designator, the SCR tech documents the current revision from F079 / the controlled spec folder; material may be documented from the part print.\n- When the traveler asserts such a value and the PO is SILENT on it, still report it (the reviewer must record the controlled source and provenance to accept it) and set internalSourceEligible=true on the discrepancy. It renders as a provenance-pending item, not a hard mismatch.\n- If the PO EXPLICITLY states a revision/value and the traveler differs, it is ALWAYS a hard discrepancy (internalSourceEligible=false). A newer internal revision never overrides the customer's stated revision.\n- End user: never accept an end user inferred from a spec author. The end user is profile-mapped (customer profile / PO / print) or N/A. A traveler end user with no PO/print/profile basis is a discrepancy (internalSourceEligible=false).\n- The traveler omitting something the PO requires ON THE TRAVELER (per the scope above) is NOT_ON_TRAVELER and usually a finding.\n\nDISCREPANCY OUTPUT (drives the correction loop):\n- Every MISMATCH / nonconforming correction / unverified assertion becomes a discrepancies[] entry with the PO value (yardstick), the found value, a COPY-READY correctedValue, and a concrete action (fix the Access field / correct the traveler per SP1250 with single-line strikethrough + initials + date).\n- Classify each with tier/severity/class/gate exactly like SCR1 issues (HOLD = hard stop at gate; ALERT = tracked, closes at gate). Findings that must be fixed before the parts are packaged → gate PACKAGING. Cert/COC-affecting → FINAL INSPECTION. Ship/routing → SHIP.\n- Do NOT raise a discrepancy for a value that matches, for print-only information correctly absent from the traveler, for anything in the TRAVELER SCOPE exclusions above, or for routine items already tracked at SCR1 (e.g. routine price verification) unless the documents contradict each other.\n- MINOR cosmetic differences (spacing, casing) are status MINOR on the comparison row, not discrepancies, unless they'd print wrong on labels/COC/invoice.\n\n=== THREE CARDINAL RULES (SP0120 / QOP 82-03 lineage) ===\nRULE 1 — THE PO GOVERNS. Transcribe exactly what the current PO states. If the PO conflicts with a print, spec, COC, or database value, mark CONFLICT and raise an issue — NEVER silently resolve a conflict or let one source override another.\nRULE 2 — SPECS REQUIRE REVISION DESIGNATORS (REV. X / VER. X). \"Latest\", \"current\", or \"approved\" with no designator → flag. \"Per drawing\" is valid ONLY when the drawing is in hand and the requirement explicit — a \"per drawing\" callout with the drawing missing or the requirement not explicit is a HOLD · PRE-CLEAN (Critical).\nRULE 2 EXCEPTION REGISTRY — these carry no traditional revision; accept as-is when the spec number is complete, and NEVER flag them for a missing REV.:\n- CGA G4.14 (Compressed Gas Association) · EIGA 200/17 (European Industrial Gases Assoc.) — the number IS the controlled version.\n- BPS-0-100T (Boeing packaging) — capture the CATEGORY.\n- All SPX- prefixed specs (SpaceX) — VER. is the valid designator, not REV.\n- All MAP- prefixed specs (Moog Aircraft Products) — the full spec number IS the controlled version.\nRULE 3 — CUSTOMER \"OR\" ALTERNATIVES REQUIRE CUSTOMER SELECTION (e.g. \"Level 100 or Level 50\"). Flag Tier 3, HOLD · PRE-CLEAN. NEVER choose on the customer's behalf.\n\n=== THE TOOL DOES NOT VOLUNTEER (floor ruling 2026-07-14) ===\nFlag ONLY deviations from what the current PO (and its stated flow-downs) actually requires. NEVER suggest adding a document, requirement, statement, or line the PO does not state — e.g. do NOT flag \"this job needs a COC\" when the PO does not require certification, and do NOT offer extra checks, packaging, or paperwork as advice. If something is genuinely ambiguous, that is an UNCLEAR/CONFLICT finding tied to specific PO text — cite the PO language that creates it. A finding with no PO requirement behind it is a defect in YOUR output, and the techs will rate it WRONG.\n- BOILERPLATE IS NOT A FLAG FACTORY: a PO's standard quality-clause / terms block NEVER produces one finding per bullet. If the PO states clauses apply, that is ONE consolidated review item (per the locked classifications). Only a clause that changes processing, handling, packaging, or certification FOR THIS SPECIFIC JOB may be raised individually.\n\n=== TIER MEANING (classify tier by who resolves) ===\n- Tier 1 = routine; extract/flag/record, no resolution needed beyond verification.\n- Tier 2 = bounded internal fix under Level 2 authority (requirement explicit in governing docs in hand; resolvable by transcription/field placement/cross-reference alone; no inference, no customer interpretation, no quality-authority call — fail any → Tier 3). The PO is never modified; every resolution is documented. You may SUGGEST a Tier 2 fix in the issue action; a human executes it.\n- Tier 3 = requires customer contact, QM, or quality authority. When a resolution would require answering \"what did the customer mean?\", it is Tier 3.\n\n=== ADDITIONAL LOCKED CLASSIFICATIONS (the list above wins on any clash) ===\n- \"PER DRAWING\" WITH DRAWING MISSING / REQUIREMENT NOT EXPLICIT → HOLD · PRE-CLEAN · owner SCR/CUSTOMER (Critical).\n- QUANTITY UNIT UNCLEAR (could mismatch a physical count) → HOLD · PRE-CLEAN · owner SCR/CUSTOMER.\n- MULTI-LINE PO WITH DISTINCT TRACEABILITY PER LINE (separate WOs likely required; mixing lots/serials under one WO breaks traceability) → HOLD · PRE-CLEAN · owner LEVEL 2/QM.\n- CUSTOMER-SPECIFIC PACKAGING NOT STATED AND SP3000 §13 DEFAULT LOOKS INSUFFICIENT → ALERT · PACKAGING · owner SCR. (Cleanliness packaging required but UNDEFINED stays HOLD · PRE-CLEAN per the list above.)\n- VISIBLE PRICING DISCREPANCY vs. A QPC QUOTE STATED ON/WITH THE PO → HOLD · SHIP · owner ACCOUNT MANAGER/GM (routine price verification stays an ALERT).\n- RETURN TO CUSTOMER / UNPROCESSED RETURN / \"NOT CLEANED\" / \"REJECTED\" markings (PartID 7559 pattern) → HOLD · PRE-CLEAN · owner SCR/QM — confirm disposition before ANY processing.\n- DUE DATE IN THE PAST OR INSIDE A CRITICAL CAPACITY WINDOW → ALERT · OPERATIONS PLANNING · owner QM/GM (scheduling item, same calibration as expedite — not a floor hold).\n- PO PRESENTED AS AMENDMENT / CORRECTION / SUPERSESSION of a prior PO → HOLD · SCR · owner SCR/ACCOUNT MANAGER — confirm which document governs before entry.\n\n=== SPEC FAMILY INTELLIGENCE (apply with RULE 2) ===\n- IEST-STD-CC1246 — most common QPC spec; current REV. E. The cleanliness LEVEL and particle-count suffix are part of the requirement — capture them; levels are NOT interchangeable. Flag if level/suffix absent.\n- CMSP-02291 / CMSP-02292 / CMSP-02544 — QPC internal; REV. required and must match the F079-approved revision. **CMSP-02291 was superseded by CMSP-02292 effective JAN 2026 — if a PO calls out CMSP-02291, extract verbatim AND raise an ALERT (superseded spec, confirm with customer/QM).**\n- AMS2700 (passivation) — REV. required; METHOD and TYPE are required in the callout — flag if absent.\n- SPX-XXXXX (SpaceX) — VER. required (never REV.); CLASS required (1, 2, 3, or 5) — flag if class absent. SpaceX COC language is strict — capture verbatim.\n- ARP1176 — REV. required. ELEVATED: oxygen-system cleaning; NVR scope required — flag if unclear.\n- ULA 5-75192 / 5-75019 family — REV. required; the DASH SUFFIX is part of the spec identity (5-75192-2 ≠ 5-75192-4) — capture complete. AP5-75192 / AP-5-75192 = QPC-held ULA copy, treat as ULA. MPS-MPQ-105-300 / MEP1000-83 ride with 5-75192 on Arrowhead jobs.\n- STP0637 / STP0565 / STP0413 / STP1012-01 (ULA/Boeing) — the full suffix IS the revision; capture complete.\n- HBPS-06-009 / HBPS-32-001 (Boeing Heritage) — full sub-suffix mandatory.\n- RA- / AR- / RF- / RL- (Aerojet Rocketdyne) — REV. required; AR approval required. RL- = RL-10 engine work (elevated care).\n- MIL-STD-1246 — SUPERSEDED by IEST-STD-CC1246: extract verbatim, raise an ALERT to confirm the intended current spec.\n- QQ-P-35 — SUPERSEDED by AMS2700: extract verbatim, note superseded status in the issue.\n- KSC-SPEC-Z-0008 (pressure test) / KSC-C-123 (NASA Kennedy) — REV. required.\n- NGSP / NGPR / NVA / ENSP (Northrop Grumman) — REV. required.\n- BAC5402 / BAC5749 / BAC5753 (Boeing) — REV. required.\n- TM-17805 / EPS50405 / AT67200228 — unclassified specs: raise an ALERT for an F079 approved-process check.\n\n=== SP3000 MATERIAL RESTRICTIONS (drives material/process-compatibility HOLDs) ===\nIf the PO's stated material/part condition hits one of these and the callout implies the restricted operation, raise MATERIAL-PROCESS COMPATIBILITY (HOLD · PRE-CLEAN):\n- Dry-film-lubricated surfaces — no aqueous cleaning, no ultrasonics.\n- Nonmetallic / adhesively bonded parts — no ultrasonics.\n- Electrical components — no ultrasonics.\n- Complex hardware with enclosed entrapment areas — no ultrasonics.\n- Plated metals — ultrasonics ≤ 1 min, 1 repeat max.\n- Bare aluminum 6061 — no ultrasonics. Other bare/anodized aluminum — ultrasonics ≤ 5 min, 1 repeat max. Chemically filmed aluminum — solution ≤ 110°F, ultrasonics ≤ 1 min, 1 repeat max.\n- Titanium — no halogenated solvents (Vertrel XF is the only exception).\n- Inseparable bearing components — no compressed-gas drying.\n- NVR-requirement parts — DI water is not the final cleaner.\n- LOX / oxidizer / oxygen-service parts — NVR required; flag if scope unclear.\n- Hydraulic parts — NVR and blacklight NOT required (don't invent requirements).\n\n=== DESCRIPTION — THREE DOWNSTREAM CONSUMERS ===\nThe Description field flows VERBATIM to (1) the traveler/DB, (2) the part labels, and (3) the customer invoice. A formatting error ships three ways. Therefore:\n- One identifier per line — never slash-separated.\n- Never guess a missing identifier; use only identifiers present on the current PO.\n- Process specs NEVER appear in Description (zero instances in 28k historical lines).\n- Status markers (RETURN TO CUSTOMER / REJECTED / NOT CLEANED) at the very end only.\n\n=== BILLING CONVENTIONS (extract these; the server also verifies deterministically) ===\n- EXPEDITE LINE: PartID 3 line. The expedite FEE is entered only if explicitly stated on the PO — never inferred.\n- WAIVED EXPEDITE: an expedite line at $0.00 with \"WAIVED BY [INITIALS]\" in its Description. If the PO/notes show an expedite was waived, the Description of that line must carry WAIVED BY [INITIALS] — extract the initials if stated; if a waiver is indicated with no initials, raise an ALERT (SCR gate).\n- LOT MINIMUM (2026): $350 per PO — the server computes sum(price × qty) excluding expedite lines and flags the human to add the PartID 7330 line when under $350. You do NOT add lines yourself.","tool":{"name":"emit_scr2","description":"Emit the SCR2 validation report for this job.","input_schema":{"type":"object","additionalProperties":false,"properties":{"travelerComparison":{"type":"array","description":"one row per traveler field, compared against the value the PO requires","items":{"type":"object","additionalProperties":false,"properties":{"field":{"type":"string"},"poValue":{"type":"string","description":"what the CURRENT PO requires (verbatim); \"\" if the PO is silent"},"travelerValue":{"type":"string","description":"what the traveler shows, reading valid SP1250 corrections as the corrected value; [UNCLEAR] if illegible"},"status":{"type":"string","enum":["MATCH","MINOR","MISMATCH","UNCLEAR","NOT_ON_TRAVELER"]},"note":{"type":"string","description":"REQUIRED for anything not MATCH — what differs and why it matters"},"correctionText":{"type":"string","description":"handwritten/strikethrough correction seen for this field; \"\" if none"},"correctionInitials":{"type":"string","enum":["YES","NO","N/A"]},"correctionDate":{"type":"string","enum":["YES","NO","N/A"]}},"required":["field","poValue","travelerValue","status","note","correctionText","correctionInitials","correctionDate"]}},"discrepancies":{"type":"array","description":"one entry per substantive finding — these become ledger issues and drive the correction loop","items":{"type":"object","additionalProperties":false,"properties":{"label":{"type":"string"},"field":{"type":"string","description":"the DB/traveler/label field involved"},"poValue":{"type":"string","description":"the yardstick value from the CURRENT PO"},"foundValue":{"type":"string","description":"what the traveler/label actually shows"},"foundIn":{"type":"string","enum":["TRAVELER","LABELS","BOTH"]},"correctedValue":{"type":"string","description":"copy-ready corrected value the human should enter (derived from the PO)"},"poStates":{"type":"string"},"tier":{"type":"integer","enum":[1,2,3]},"severity":{"type":"string","enum":["CRITICAL","MAJOR","MINOR"]},"class":{"type":"string","enum":["HOLD","ALERT"]},"gate":{"type":"string","enum":["RECEIVING","SCR","PRE-CLEAN","PACKAGING","FINAL INSPECTION","SHIP","OPERATIONS PLANNING"]},"owner":{"type":"string"},"why":{"type":"string"},"action":{"type":"string","description":"the correction to make (Access field / label regeneration / SP1250 traveler correction) and how to document it"},"internalSourceEligible":{"type":"boolean","description":"true ONLY when the traveler asserts a controlled value the PO is SILENT on (spec revision from the spec folder/F079, material from the print) — the reviewer may record an internal controlled source with provenance. ALWAYS false when the PO explicitly states a value and the traveler differs: that is a hard discrepancy; a newer internal revision never overrides the customer’s stated revision."}},"required":["label","field","poValue","foundValue","foundIn","correctedValue","poStates","tier","severity","class","gate","owner","why","action","internalSourceEligible"]}},"summary":{"type":"string","description":"2-4 sentences: overall condition of this job at SCR2"}},"required":["travelerComparison","discrepancies","summary"]}}},"fi":{"system":"You are the QPC Final Inspection document audit (third verification stage at Quality Precision Cleaning). You receive the CURRENT customer PO, the COC (certificate of conformance) draft, the pack slip, the generated part labels, and — when available — the completed traveler. Labels were GENERATED at SCR2; verifying them is YOUR job. You audit the ship-ready paperwork by calling emit_final_inspection exactly once.\n\nAUTHORITY: the PO is the comparison authority for everything contractual. The traveler is the reference for pack-slip consistency (the pack slip must match BOTH the traveler and the PO). You are auditing SCR2's output — do not assume anything was already checked.\n\nCOC CHECKS (cocChecks) — the COC ships to the customer and certifies compliance:\n- Certification/process language must match the PO's requirements VERBATIM where the PO dictates language (spec callouts, revisions, required statements). A spec revision on the COC that the PO does not state is an unverified assertion — CRITICAL finding unless the job record documents customer confirmation (you cannot see that record; flag it and say the closure requires the documented confirmation).\n- Description, part number/revision, quantity, serials must match the PO.\n- Customer name, PO number, WO number correct.\n- Required certification statements present (e.g. if the PO says certification is required, test data/ATP references per the PO).\n- Signature/stamp/date presence: note if absent (stamp presence may be a physical/human check — status UNCLEAR with a note, not a guess).\n\nPACK SLIP CHECKS (packSlipChecks):\n- Ship-To vs the PO's ship-to. Ship method vs the PO (routing errors ship parts to the wrong place — a WILL CALL vs carrier mismatch is a SHIP-gate finding). Terms vs PO.\n- PO number, WO number, line description, quantity vs both PO and traveler.\n\nLABEL VERIFICATION (labels + labelCoverage):\n- For each label, construct SHOULD READ from the PO (+ the description rules below), then compare the ACTUAL label text.\n- Checks per label: customer name · part number · part revision · process spec/level (with designator rules) · traceability fields (S/N, LOT, JOB NO...) · date of cleaning · inspection stamp presence (if the medium can't show a stamp, NOT_PRESENT with a note — the physical stamp check is a human step).\n- ONE LABEL PER TRACEABILITY UNIT: enumerate every unit the PO requires (each serial in stated ranges, each lot). Report coverage: expected vs labeled vs missing vs extra. A missing serial's label is a MAJOR finding.\n- Labels asserting spec revisions the PO doesn't state → unverified-source finding (same rule as the COC).\n\nTRACEABILITY MATRIX (traceability): for each traceability field (part number, part revision, serial numbers, lot/job numbers, quantity, process spec callout), report the value as shown on EVERY document (po/traveler/labels/coc/packSlip; use \"—\" when a document legitimately doesn't carry that field, [UNCLEAR] if illegible, [ABSENT] if it should be there but isn't) and whether they are consistent.\n\nDISCREPANCIES: every substantive finding becomes a discrepancies[] entry with copy-ready correctedValue and a concrete action. Gate calibration: COC/cert-language issues → FINAL INSPECTION; ship-to/ship-method/routing → SHIP; traceability breaks → FINAL INSPECTION (CRITICAL). Do not re-raise findings that are purely SCR1/SCR2 territory (e.g. traveler-internal issues) unless they surface on the COC or pack slip.\n- NEVER guess illegible content. [UNCLEAR] plus a note. Every non-PASS row carries a note — an unexplained blank is never acceptable.\n\n=== THREE CARDINAL RULES (SP0120 / QOP 82-03 lineage) ===\nRULE 1 — THE PO GOVERNS. Transcribe exactly what the current PO states. If the PO conflicts with a print, spec, COC, or database value, mark CONFLICT and raise an issue — NEVER silently resolve a conflict or let one source override another.\nRULE 2 — SPECS REQUIRE REVISION DESIGNATORS (REV. X / VER. X). \"Latest\", \"current\", or \"approved\" with no designator → flag. \"Per drawing\" is valid ONLY when the drawing is in hand and the requirement explicit — a \"per drawing\" callout with the drawing missing or the requirement not explicit is a HOLD · PRE-CLEAN (Critical).\nRULE 2 EXCEPTION REGISTRY — these carry no traditional revision; accept as-is when the spec number is complete, and NEVER flag them for a missing REV.:\n- CGA G4.14 (Compressed Gas Association) · EIGA 200/17 (European Industrial Gases Assoc.) — the number IS the controlled version.\n- BPS-0-100T (Boeing packaging) — capture the CATEGORY.\n- All SPX- prefixed specs (SpaceX) — VER. is the valid designator, not REV.\n- All MAP- prefixed specs (Moog Aircraft Products) — the full spec number IS the controlled version.\nRULE 3 — CUSTOMER \"OR\" ALTERNATIVES REQUIRE CUSTOMER SELECTION (e.g. \"Level 100 or Level 50\"). Flag Tier 3, HOLD · PRE-CLEAN. NEVER choose on the customer's behalf.\n\n=== THE TOOL DOES NOT VOLUNTEER (floor ruling 2026-07-14) ===\nFlag ONLY deviations from what the current PO (and its stated flow-downs) actually requires. NEVER suggest adding a document, requirement, statement, or line the PO does not state — e.g. do NOT flag \"this job needs a COC\" when the PO does not require certification, and do NOT offer extra checks, packaging, or paperwork as advice. If something is genuinely ambiguous, that is an UNCLEAR/CONFLICT finding tied to specific PO text — cite the PO language that creates it. A finding with no PO requirement behind it is a defect in YOUR output, and the techs will rate it WRONG.\n- BOILERPLATE IS NOT A FLAG FACTORY: a PO's standard quality-clause / terms block NEVER produces one finding per bullet. If the PO states clauses apply, that is ONE consolidated review item (per the locked classifications). Only a clause that changes processing, handling, packaging, or certification FOR THIS SPECIFIC JOB may be raised individually.\n\n=== TIER MEANING (classify tier by who resolves) ===\n- Tier 1 = routine; extract/flag/record, no resolution needed beyond verification.\n- Tier 2 = bounded internal fix under Level 2 authority (requirement explicit in governing docs in hand; resolvable by transcription/field placement/cross-reference alone; no inference, no customer interpretation, no quality-authority call — fail any → Tier 3). The PO is never modified; every resolution is documented. You may SUGGEST a Tier 2 fix in the issue action; a human executes it.\n- Tier 3 = requires customer contact, QM, or quality authority. When a resolution would require answering \"what did the customer mean?\", it is Tier 3.\n\n=== ADDITIONAL LOCKED CLASSIFICATIONS (the list above wins on any clash) ===\n- \"PER DRAWING\" WITH DRAWING MISSING / REQUIREMENT NOT EXPLICIT → HOLD · PRE-CLEAN · owner SCR/CUSTOMER (Critical).\n- QUANTITY UNIT UNCLEAR (could mismatch a physical count) → HOLD · PRE-CLEAN · owner SCR/CUSTOMER.\n- MULTI-LINE PO WITH DISTINCT TRACEABILITY PER LINE (separate WOs likely required; mixing lots/serials under one WO breaks traceability) → HOLD · PRE-CLEAN · owner LEVEL 2/QM.\n- CUSTOMER-SPECIFIC PACKAGING NOT STATED AND SP3000 §13 DEFAULT LOOKS INSUFFICIENT → ALERT · PACKAGING · owner SCR. (Cleanliness packaging required but UNDEFINED stays HOLD · PRE-CLEAN per the list above.)\n- VISIBLE PRICING DISCREPANCY vs. A QPC QUOTE STATED ON/WITH THE PO → HOLD · SHIP · owner ACCOUNT MANAGER/GM (routine price verification stays an ALERT).\n- RETURN TO CUSTOMER / UNPROCESSED RETURN / \"NOT CLEANED\" / \"REJECTED\" markings (PartID 7559 pattern) → HOLD · PRE-CLEAN · owner SCR/QM — confirm disposition before ANY processing.\n- DUE DATE IN THE PAST OR INSIDE A CRITICAL CAPACITY WINDOW → ALERT · OPERATIONS PLANNING · owner QM/GM (scheduling item, same calibration as expedite — not a floor hold).\n- PO PRESENTED AS AMENDMENT / CORRECTION / SUPERSESSION of a prior PO → HOLD · SCR · owner SCR/ACCOUNT MANAGER — confirm which document governs before entry.\n\n=== SPEC FAMILY INTELLIGENCE (apply with RULE 2) ===\n- IEST-STD-CC1246 — most common QPC spec; current REV. E. The cleanliness LEVEL and particle-count suffix are part of the requirement — capture them; levels are NOT interchangeable. Flag if level/suffix absent.\n- CMSP-02291 / CMSP-02292 / CMSP-02544 — QPC internal; REV. required and must match the F079-approved revision. **CMSP-02291 was superseded by CMSP-02292 effective JAN 2026 — if a PO calls out CMSP-02291, extract verbatim AND raise an ALERT (superseded spec, confirm with customer/QM).**\n- AMS2700 (passivation) — REV. required; METHOD and TYPE are required in the callout — flag if absent.\n- SPX-XXXXX (SpaceX) — VER. required (never REV.); CLASS required (1, 2, 3, or 5) — flag if class absent. SpaceX COC language is strict — capture verbatim.\n- ARP1176 — REV. required. ELEVATED: oxygen-system cleaning; NVR scope required — flag if unclear.\n- ULA 5-75192 / 5-75019 family — REV. required; the DASH SUFFIX is part of the spec identity (5-75192-2 ≠ 5-75192-4) — capture complete. AP5-75192 / AP-5-75192 = QPC-held ULA copy, treat as ULA. MPS-MPQ-105-300 / MEP1000-83 ride with 5-75192 on Arrowhead jobs.\n- STP0637 / STP0565 / STP0413 / STP1012-01 (ULA/Boeing) — the full suffix IS the revision; capture complete.\n- HBPS-06-009 / HBPS-32-001 (Boeing Heritage) — full sub-suffix mandatory.\n- RA- / AR- / RF- / RL- (Aerojet Rocketdyne) — REV. required; AR approval required. RL- = RL-10 engine work (elevated care).\n- MIL-STD-1246 — SUPERSEDED by IEST-STD-CC1246: extract verbatim, raise an ALERT to confirm the intended current spec.\n- QQ-P-35 — SUPERSEDED by AMS2700: extract verbatim, note superseded status in the issue.\n- KSC-SPEC-Z-0008 (pressure test) / KSC-C-123 (NASA Kennedy) — REV. required.\n- NGSP / NGPR / NVA / ENSP (Northrop Grumman) — REV. required.\n- BAC5402 / BAC5749 / BAC5753 (Boeing) — REV. required.\n- TM-17805 / EPS50405 / AT67200228 — unclassified specs: raise an ALERT for an F079 approved-process check.\n\n=== SP3000 MATERIAL RESTRICTIONS (drives material/process-compatibility HOLDs) ===\nIf the PO's stated material/part condition hits one of these and the callout implies the restricted operation, raise MATERIAL-PROCESS COMPATIBILITY (HOLD · PRE-CLEAN):\n- Dry-film-lubricated surfaces — no aqueous cleaning, no ultrasonics.\n- Nonmetallic / adhesively bonded parts — no ultrasonics.\n- Electrical components — no ultrasonics.\n- Complex hardware with enclosed entrapment areas — no ultrasonics.\n- Plated metals — ultrasonics ≤ 1 min, 1 repeat max.\n- Bare aluminum 6061 — no ultrasonics. Other bare/anodized aluminum — ultrasonics ≤ 5 min, 1 repeat max. Chemically filmed aluminum — solution ≤ 110°F, ultrasonics ≤ 1 min, 1 repeat max.\n- Titanium — no halogenated solvents (Vertrel XF is the only exception).\n- Inseparable bearing components — no compressed-gas drying.\n- NVR-requirement parts — DI water is not the final cleaner.\n- LOX / oxidizer / oxygen-service parts — NVR required; flag if scope unclear.\n- Hydraulic parts — NVR and blacklight NOT required (don't invent requirements).\n\n=== DESCRIPTION — THREE DOWNSTREAM CONSUMERS ===\nThe Description field flows VERBATIM to (1) the traveler/DB, (2) the part labels, and (3) the customer invoice. A formatting error ships three ways. Therefore:\n- One identifier per line — never slash-separated.\n- Never guess a missing identifier; use only identifiers present on the current PO.\n- Process specs NEVER appear in Description (zero instances in 28k historical lines).\n- Status markers (RETURN TO CUSTOMER / REJECTED / NOT CLEANED) at the very end only.\n\n=== BILLING CONVENTIONS (extract these; the server also verifies deterministically) ===\n- EXPEDITE LINE: PartID 3 line. The expedite FEE is entered only if explicitly stated on the PO — never inferred.\n- WAIVED EXPEDITE: an expedite line at $0.00 with \"WAIVED BY [INITIALS]\" in its Description. If the PO/notes show an expedite was waived, the Description of that line must carry WAIVED BY [INITIALS] — extract the initials if stated; if a waiver is indicated with no initials, raise an ALERT (SCR gate).\n- LOT MINIMUM (2026): $350 per PO — the server computes sum(price × qty) excluding expedite lines and flags the human to add the PartID 7330 line when under $350. You do NOT add lines yourself.","tool":{"name":"emit_final_inspection","description":"Emit the Final Inspection document audit for this job.","input_schema":{"type":"object","additionalProperties":false,"properties":{"cocChecks":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"item":{"type":"string"},"expected":{"type":"string","description":"what the PO (or traveler, for pack-slip consistency items) requires — verbatim where language matters"},"found":{"type":"string","description":"what the document actually shows; [UNCLEAR] if illegible"},"status":{"type":"string","enum":["PASS","DISCREPANCY","UNCLEAR"]},"note":{"type":"string","description":"REQUIRED for anything not PASS"}},"required":["item","expected","found","status","note"]},"description":"COC draft vs PO: certification language, process callouts, description, quantity, identity"},"packSlipChecks":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"item":{"type":"string"},"expected":{"type":"string","description":"what the PO (or traveler, for pack-slip consistency items) requires — verbatim where language matters"},"found":{"type":"string","description":"what the document actually shows; [UNCLEAR] if illegible"},"status":{"type":"string","enum":["PASS","DISCREPANCY","UNCLEAR"]},"note":{"type":"string","description":"REQUIRED for anything not PASS"}},"required":["item","expected","found","status","note"]},"description":"pack slip vs PO and traveler: ship-to, ship method, terms, PO/WO numbers, description, quantity"},"labels":{"type":"array","description":"one entry per physical label found in the labels document — labels were generated at SCR2; verify them here","items":{"type":"object","additionalProperties":false,"properties":{"labelRef":{"type":"string","description":"e.g. \"label 3\""},"traceabilityUnit":{"type":"string","description":"the S/N / lot the label belongs to"},"shouldRead":{"type":"string","description":"full expected label text derived from the PO + description rules"},"actual":{"type":"string","description":"full text actually on the label"},"status":{"type":"string","enum":["PASS","DISCREPANCY","UNCLEAR"]},"checks":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"check":{"type":"string","enum":["customerName","partNumber","partRevision","processSpec","traceability","dateOfCleaning","inspectionStamp"]},"status":{"type":"string","enum":["PASS","DISCREPANCY","UNCLEAR","NOT_PRESENT"]},"note":{"type":"string"}},"required":["check","status","note"]}}},"required":["labelRef","traceabilityUnit","shouldRead","actual","status","checks"]}},"labelCoverage":{"type":"object","additionalProperties":false,"properties":{"expectedUnits":{"type":"array","items":{"type":"string"},"description":"every traceability unit the PO requires (e.g. each serial)"},"labeledUnits":{"type":"array","items":{"type":"string"}},"missing":{"type":"array","items":{"type":"string"}},"extra":{"type":"array","items":{"type":"string"}}},"required":["expectedUnits","labeledUnits","missing","extra"]},"traceability":{"type":"array","description":"one row per traceability field, its value on every document","items":{"type":"object","additionalProperties":false,"properties":{"field":{"type":"string"},"po":{"type":"string"},"traveler":{"type":"string"},"labels":{"type":"string"},"coc":{"type":"string"},"packSlip":{"type":"string"},"consistent":{"type":"string","enum":["YES","NO"]},"note":{"type":"string"}},"required":["field","po","traveler","labels","coc","packSlip","consistent","note"]}},"discrepancies":{"type":"array","description":"substantive findings — these become ledger issues","items":{"type":"object","additionalProperties":false,"properties":{"label":{"type":"string"},"field":{"type":"string"},"poValue":{"type":"string"},"foundValue":{"type":"string"},"foundIn":{"type":"string","enum":["COC","PACK_SLIP","TRAVELER","LABELS","MULTIPLE"]},"correctedValue":{"type":"string","description":"copy-ready corrected value derived from the PO"},"poStates":{"type":"string"},"tier":{"type":"integer","enum":[1,2,3]},"severity":{"type":"string","enum":["CRITICAL","MAJOR","MINOR"]},"class":{"type":"string","enum":["HOLD","ALERT"]},"gate":{"type":"string","enum":["RECEIVING","SCR","PRE-CLEAN","PACKAGING","FINAL INSPECTION","SHIP","OPERATIONS PLANNING"]},"owner":{"type":"string"},"why":{"type":"string"},"action":{"type":"string"}},"required":["label","field","poValue","foundValue","foundIn","correctedValue","poStates","tier","severity","class","gate","owner","why","action"]}},"summary":{"type":"string"}},"required":["cocChecks","packSlipChecks","labels","labelCoverage","traceability","discrepancies","summary"]}}}}</script>
+<script id="fscr-normalize">
+'use strict';
+/**
+ * FSCR deterministic normalizer — SINGLE SOURCE OF TRUTH for the QPC
+ * formatting conventions ratified 2026-07-14 (harvest tuning pass, Group A).
+ *
+ * Three-layer contract: these functions derive the dbValue (what gets copied
+ * into Access) from the sourceValue (verbatim PO extraction). They must NEVER
+ * be applied to the sourceValue in place — normalization is not source
+ * alteration. Everything here is deterministic string transformation; no
+ * model judgment.
+ *
+ * Consumed by:
+ *  - server/extract.ts (dbValue derivation in the mapping step)
+ *  - demo/fscr-beta.html (spliced in by demo/inject-beta-data.py as a plain
+ *    script — the `export ` prefixes are stripped at splice time)
+ *  - tests/acceptance.mjs (fixture suite — run before ANY beta regeneration)
+ */
+
+// ---- spec-family revision expansion (allowlist ONLY — ruling 2026-07-14) ----
+// A single trailing capital letter is an embedded revision designator ONLY for
+// these spec stems. Never apply a generic trailing-letter regex: part numbers
+// legitimately end in letters (e.g. 704X4GF) and must never be modified.
+const SPEC_REV_ALLOWLIST = ['IEST-STD-CC1246', 'AMS2700']
+
+function expandSpecRevisions(text) {
+  if (!text) return text
+  let out = String(text)
+  for (const stem of SPEC_REV_ALLOWLIST) {
+    const esc = stem.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')
+    // stem immediately followed by one capital letter at a word boundary
+    const re = new RegExp('\\b' + esc + '\\s?([A-Z])\\b(?![.\\-])', 'g')
+    out = out.replace(re, stem + ' REV. $1')
+  }
+  return out
+}
+
+// ---- ship-to: multi-line address block, no phone numbers ----
+const PHONE_RE = /\(?\d{3}\)?[ \-.]?\d{3}[ \-.]?\d{4}/
+const STATE_ZIP_RE = /^[A-Za-z]{2}\.?\s+\d{5}(-\d{4})?$/
+
+function normalizeShipTo(v) {
+  if (!v) return v
+  let lines
+  if (v.includes('\n')) {
+    lines = v.split('\n')
+  } else {
+    // comma- or slash-joined single line → segments
+    const parts = v.split(/\s*\/\s*|,\s*/)
+    lines = []
+    for (const p of parts) {
+      // "CA 91350" style segment reattaches to the city before it
+      if (STATE_ZIP_RE.test(p.trim()) && lines.length) {
+        lines[lines.length - 1] += ', ' + p.trim()
+      } else {
+        lines.push(p.trim())
+      }
+    }
+  }
+  lines = lines.map((l) => l.trim()).filter((l) => l && !(PHONE_RE.test(l) && l.replace(PHONE_RE, '').trim().length <= 2))
+  return lines.join('\n')
+}
+
+// ---- ship method: bare account number on line 2; WILL CALL normalization ----
+const CARRIER_RE = /\b(UPS|FEDEX|FED EX|DHL|USPS|ONTRAC|XPO|FREIGHT|AIR|GROUND)\b/i
+const WILL_CALL_RE = /\bWILL\s*CALL\b|\bSELF[\s-]*PICK\s*-?\s*UP\b|\bPICK\s*-?\s*UP\s+(ORGANIZED|ARRANGED)\b|\b(OUR|COMPANY|CUSTOMER)\s+TRUCK\b/i
+const ACCT_PREFIX_RE = /^\s*(THIRD[\s-]*PARTY\s+)?ACC(?:OUN)?T\.?\s*(NO\.?|NUMBER)?\s*[:#]?\s*#?\s*/i
+
+function normalizeShipMethod(v) {
+  if (!v) return v
+  // customer's own transport / self-pickup = WILL CALL (ruling A3), but never
+  // when a real carrier is named on the same value
+  if (WILL_CALL_RE.test(v) && !CARRIER_RE.test(v)) return 'WILL CALL'
+  if (/\bTRUCK\b/i.test(v) && !CARRIER_RE.test(v)) return 'WILL CALL'
+  return v
+    .split('\n')
+    .map((l) => l.replace(ACCT_PREFIX_RE, '').trim())
+    .filter(Boolean)
+    .join('\n')
+}
+
+// ---- description label conventions (deterministic half of A4) ----
+function normalizeDescription(v) {
+  if (!v) return v
+  let out = String(v)
+  // merge a standalone "REV: X" line into the preceding P/N line
+  out = out.replace(/(P\/N:\s*[^\n]+?)\s*\n\s*REV[.:]\s*([^\n]+)/g, '$1 REV. $2')
+  // label spelling
+  out = out.replace(/\bREV:\s*/g, 'REV. ')
+  out = out.replace(/\bLOT\s*#\s*/g, 'LOT NO: ')
+  out = out.replace(/\b(?:HT|HEAT)\s*#\s*/g, 'HEAT NO: ')
+  out = out.replace(/\bJOB\s*#\s*/g, 'JOB NO: ')
+  out = out.replace(/^DRAWING:\s*/gm, 'DRAWING NO: ')
+  out = out.replace(/\bWO\s*#\s*/g, 'WO NO: ')
+  // serial/lot list separators: ampersand → comma (only on traceability lines)
+  out = out
+    .split('\n')
+    .map((l) => (/\b(S\/N|SERIAL|LOT NO|HEAT NO)\b/i.test(l) ? l.replace(/\s+&\s+/g, ', ') : l))
+    .join('\n')
+  // exact duplicate line removal (first occurrence wins)
+  return dedupeExactLines(out)
+}
+
+// ---- exact-duplicate removal (lines and " / "-joined segments) ----
+function dedupeExactLines(text) {
+  if (!text) return text
+  const seen = new Set()
+  return text
+    .split('\n')
+    .filter((l) => {
+      const key = l.trim().toUpperCase().replace(/[.\s]+$/g, '')
+      if (!key) return true
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .join('\n')
+}
+
+// ---- special instructions (deterministic backstop for ruling B4) ------------
+// Certification/CofC statements are NEVER special instructions — they are
+// handled once at Final Inspection. The prompt says so; this guarantees it.
+const CERT_LINE_RE = /\b(CERTIFICATE|CERTIFICATION|CERTIFY|C\s*OF\s*C|COFC)\b/i
+function normalizeSpecialInstructions(v) {
+  if (!v) return v
+  const kept = dedupeExactLines(v)
+    .split('\n')
+    .filter((l) => !CERT_LINE_RE.test(l))
+    .join('\n')
+    .trim()
+  return kept
+}
+
+function normalizeCallout(v) {
+  if (!v) return v
+  let out = expandSpecRevisions(v)
+  // exact duplicate segments joined by " / " (verbatim repeats only — semantic
+  // dedupe of reworded repeats is the prompt's job, ruling A5)
+  const segs = out.split(/\s*\/\s*/)
+  if (segs.length > 1) {
+    const seen = new Set()
+    out = segs
+      .filter((s) => {
+        const key = s.trim().toUpperCase().replace(/[.\s]+$/g, '')
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+      .join(' / ')
+  }
+  return dedupeExactLines(out)
+}
+
+// ---- WO number validation (Group D — no narrow whitelist) ----
+function validateWo(v) {
+  const t = String(v ?? '').trim()
+  if (!t) return { ok: false, reason: 'WO number is required.' }
+  if (/[\n\r]/.test(t)) return { ok: false, reason: 'WO number must be a single line — this looks like pasted description text.' }
+  if (t.length > 16) return { ok: false, reason: 'WO number is unreasonably long (' + t.length + ' chars) — this looks like pasted content, not an Access WO number.' }
+  if (/:/.test(t)) return { ok: false, reason: 'WO number cannot contain ":" — this looks like a pasted field label.' }
+  return { ok: true }
+}
+
+// ---- vague-closure detection (ledger migration + resolution gate) ----
+const VAGUE_SET = new Set([
+  'done', 'ok', 'okay', 'k', 'kk', 'fine', 'good', 'yes', 'yea', 'yeah', 'noted',
+  'sure', 'noduh', 'thatsfine', 'thatisfine', 'itsfine', 'itisfine', 'thatfine',
+  'alright', 'allgood', 'np', 'none', 'thanks', 'thx', 'x', 'na', 'good2go', 'goodtogo',
+])
+function isVagueClosure(text) {
+  const key = String(text ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  return key.length === 0 || VAGUE_SET.has(key)
+}
+
+// ---- expedite classification (survives an empty DB description — B5) ----
+function isExpediteLine(partId, sourceDescription) {
+  if (String(partId ?? '').trim() === '3') return true
+  return /\bEXPEDITE\b/i.test(String(sourceDescription ?? ''))
+}
+function waivedByFromSource(sourceDescription) {
+  const m = String(sourceDescription ?? '').toUpperCase().match(/WAIVED\s+BY[:\s]+([A-Z.]{2,10})/)
+  return m ? m[1].replace(/\./g, '') : null
+}
+
+// ---- instance migration: qpc.fscr.beta/v1 → v2 (ledger states + layers) ----
+// Pure: pass todayStr in (no Date.now in shared code). Mutates and returns j.
+function migrateInstance(j, todayStr) {
+  if (!j || j.schema === 'qpc.fscr.beta/v2') return j
+  j.schema = 'qpc.fscr.beta/v2'
+  const closed = j.stage === 'CLOSED'
+  if (j.scr1 && Array.isArray(j.scr1.fields)) {
+    for (const f of j.scr1.fields) {
+      if (f.src === undefined) f.src = f.orig !== undefined ? f.orig : f.v
+    }
+  }
+  for (const i of j.ledger || []) {
+    i.audit = i.audit || []
+    if (i.res) {
+      if (isVagueClosure(i.res.note) && !closed) {
+        // unfinished job: vague legacy closure reopens as a migrated note
+        i.audit.push({ at: todayStr, what: 'MIGRATION reopened vague closure', detail: `${i.res.by || '?'} ${i.res.date || ''}: "${i.res.note || ''}"` })
+        ;(i.notes = i.notes || []).push({
+          note: `MIGRATED — previously closed by ${i.res.by || '?'} (${i.res.date || '?'}) with "${i.res.note || ''}"; reopened: closure lacked a documented outcome`,
+          by: 'MIGRATION', date: todayStr,
+        })
+        i.res = null
+        i.state = 'OPEN'
+      } else {
+        i.state = 'RESOLVED'
+        if (!i.res.outcome) i.res.outcome = 'LEGACY'
+        if (isVagueClosure(i.res.note) && closed) {
+          // completed job: never reopened, never retroactively blocked
+          i.legacyUnaudited = true
+        }
+      }
+    } else {
+      i.state = i.state || 'OPEN'
+    }
+  }
+  return j
+}
+</script>
+<script>
+'use strict';
+const DATA = JSON.parse(document.getElementById('beta-data').textContent);
+// Image/photo API intake is DISABLED pending the export-control and
+// data-handling ruling (2026-07-14). MIME-aware content handling is retained
+// below (contentBlockFor) for possible future activation behind this flag.
+const INTAKE={images:false};
+// theme — persisted; defaults to the OS preference
+(function(){let t=null;try{t=localStorage.getItem('fscr.beta.theme')}catch(e){}
+  if(!t)t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';
+  document.documentElement.setAttribute('data-theme',t);})();
+window.toggleTheme=()=>{const cur=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';
+  document.documentElement.setAttribute('data-theme',cur);
+  try{localStorage.setItem('fscr.beta.theme',cur)}catch(e){}
+  const b=document.getElementById('theme-btn');if(b)b.textContent=cur==='dark'?'☀️':'🌙';};
+function toast(msg,ms){const box=document.getElementById('toastbox');const t=document.createElement('div');
+  t.className='toast';t.textContent=msg;box.appendChild(t);setTimeout(()=>t.classList.add('show'),16);
+  setTimeout(()=>{t.classList.remove('show');setTimeout(()=>t.remove(),250)},ms||2000);}
+function fbCount(){if(!S)return 0;return Object.values(S.accuracy||{}).filter(a=>a&&(a.f||(a.note||'').trim())).length}
+
+const GATE_ORDER=['RECEIVING','SCR','PRE-CLEAN','PACKAGING','FINAL INSPECTION','SHIP','OPERATIONS PLANNING'];
+const STAGE_MAX={SCR1:1,SCR2:3,FI:6};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const escA=s=>esc(s).replace(/"/g,'&quot;');
+const today=()=>new Date().toISOString().slice(0,10);
+const norm=s=>(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+
+let S=null;                     // the instance (the job file)
+const KEY={v:null};             // API key — tab memory only, never saved
+const RV={name:'',ini:''};      // who is at this desk — stamped into feedback + gates
+const BUSY={on:false,msg:''};
+
+function freshInstance(){return {schema:'qpc.fscr.beta/v2',createdAt:new Date().toISOString(),stage:'SCR1',
+  po:'',customer:'',wo:null,docs:{},scr1:null,verified:{},ledger:[],scr2Report:null,fiReport:null,
+  accuracy:{},checklist:{},signoffs:[],history:[],labelAttest:null}}
+
+function persistDraft(){try{localStorage.setItem('fscr.beta.draft',JSON.stringify(S))}catch(e){}}
+function clearDraft(){try{localStorage.removeItem('fscr.beta.draft')}catch(e){}}
+
+function saveInstance(job){
+  const J=job||S; if(!J)return;
+  J.history.push({at:new Date().toISOString(),stage:J.stage,by:RV.ini||''});
+  const nm='fscr_'+(J.wo||J.po||'job').replace(/[^A-Za-z0-9-]/g,'')+'_'+J.stage+'.json';
+  try{const b=new Blob([JSON.stringify(J)],{type:'application/json'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=nm;a.click();}catch(e){}
+  if(J===S)persistDraft(); toast('\u2713 Instance saved \u2014 '+nm); return nm;
+}
+function ensurePriceItem(j){if(!j||j.stage==='CLOSED')return j;
+  const has=(j.ledger||[]).some(i=>i.kind==='price'||/PRICE\s+VERIF/i.test(i.label||''));
+  for(const i of j.ledger||[]){if(/PRICE\s+VERIF/i.test(i.label||''))i.kind='price'}
+  if(!has){j.ledger.push({id:'price-1',kind:'price',label:'PRICE VERIFICATION — ROUTINE',cls:'ALERT',
+    gate:'SHIP',tier:1,act:'Verify every line price against the QPC quote / DB parts list; record the reference as evidence.',
+    why:'Price must be verified vs the QPC quote on every job (added on load — this instance predates the deterministic item).',
+    from:'MIGRATION',state:'OPEN',res:null,audit:[]})}
+  return j}
+window.loadFile=inp=>{const f=inp.files[0];if(!f)return;const r=new FileReader();
+  r.onload=()=>{try{const o=JSON.parse(r.result);
+    if(o.schema!=='qpc.fscr.beta/v1'&&o.schema!=='qpc.fscr.beta/v2')throw new Error('Not an FSCR beta instance file.');
+    const wasV1=o.schema==='qpc.fscr.beta/v1';
+    migrateInstance(o,today());ensurePriceItem(o);
+    S=o;persistDraft();render();
+    if(wasV1){const reopened=(o.ledger||[]).filter(i=>(i.notes||[]).some(n=>n.by==='MIGRATION')).length;
+      toast(reopened?('⚠ Instance migrated — '+reopened+' vague closure'+(reopened===1?'':'s')+' reopened as migrated notes'):'✓ Instance migrated to v2');}
+  }catch(e){alert('Could not load: '+e.message)}};r.readAsText(f)};
+
+// ---- catch-up: enter a mid-stream job at SCR2 or Final Inspection ---------------
+// The job started outside FSCR (SCR1 on paper / straight into Access). Prior
+// sign-offs are recorded honestly as outside-FSCR (never faked as in-tool), and
+// reviewer independence is enforced against those real initials at the gates.
+window.startCatchup=()=>{if(needRv())return;
+  const st=$('#cu-stage').value;
+  const wo=$('#cu-wo').value.trim().toUpperCase();
+  const po=$('#cu-po').value.trim();
+  const cust=$('#cu-cust').value.trim();
+  const n1=$('#cu-s1n').value.trim(),i1=$('#cu-s1i').value.trim().toUpperCase();
+  const n2=$('#cu-s2n').value.trim(),i2=$('#cu-s2i').value.trim().toUpperCase();
+  const wv=validateWo(wo);if(!wv.ok){alert('Catch-up needs the WO number Access assigned — a mid-stream job always has one. '+wv.reason);return}
+  if(!po||!cust){alert('Catch-up needs the PO number and the customer.');return}
+  if(!i1){alert('Catch-up needs the initials of whoever did SCR1 — reviewer independence is enforced against them.');return}
+  if(st==='FI'&&!i2){alert('Entering at Final Inspection also needs the initials of whoever did SCR2.');return}
+  if(st==='FI'&&norm(i1)===norm(i2)){alert('SCR1 and SCR2 must be different people — three distinct reviewers per job.');return}
+  const J=freshInstance();J.stage=st;J.wo=wo;J.po=po;J.customer=cust;
+  J.caughtUp={at:new Date().toISOString(),by:RV.ini,enteredAt:st};
+  J.signoffs.push({stage:'SCR1',name:n1||i1,ini:i1,date:'',outside:true});
+  if(st==='FI')J.signoffs.push({stage:'SCR2',name:n2||i2,ini:i2,date:'',outside:true});
+  J.ledger.push({id:'price-1',kind:'price',label:'PRICE VERIFICATION — ROUTINE',cls:'ALERT',
+    gate:'SHIP',tier:1,act:'Verify every line price against the QPC quote / DB parts list; record the reference as evidence.',
+    why:'Price must be verified vs the QPC quote on every job — including jobs caught up mid-stream.',
+    from:'CATCH-UP',state:'OPEN',res:null,audit:[]});
+  J.history.push({at:new Date().toISOString(),stage:'CATCH-UP → '+st,by:RV.ini});
+  S=J;persistDraft();render();
+  toast('✓ WO '+wo+' caught up — upload the documents and run the '+(st==='FI'?'Final Inspection':'SCR2')+' audit');
+};
+
+// ---- identity + accuracy feedback -------------------------------------------
+window.setRv=()=>{RV.name=$('#rv-name').value.trim();RV.ini=$('#rv-ini').value.trim().toUpperCase();render()}
+function idbar(){
+  return `<div class="idbar">${RV.ini
+    ? `You are: <b>${esc(RV.name)} (${esc(RV.ini)})</b> <button onclick="RV.name='';RV.ini='';render()">change</button>
+       <span class="hint">— stamped on your feedback, resolutions, and sign-off</span>`
+    : `<b>Who are you?</b> <input id="rv-name" placeholder="Full name" value="${escA(RV.name)}">
+       <input id="rv-ini" placeholder="Initials" style="width:64px"> <button class="primary" onclick="setRv()">Set</button>
+       <span class="hint">required before feedback or sign-off</span>`}${S
+    ? `<div class="hint" style="flex-basis:100%;margin-top:4px"><b>How feedback works:</b> the extraction axis judges <b>what the source document says</b> — not what you prefer to enter into Access. Untouched fields auto-record “extraction correct · entry accepted” at sign-off. When you edit a field you answer ONE question: parser misread the PO, or PO read right and the edit is your entry preference. Findings get a <b>Useful/Noise</b> rating; anything that SHOULD have been flagged but wasn’t goes in the “missing advisory” box.</div>`:''}</div>`
+}
+window.setAcc=(k,f)=>{if(!RV.ini){alert('Set your name/initials at the top first — feedback must be attributable.');return}
+  const a=S.accuracy[k]||(S.accuracy[k]={});a.f=(a.f===f?null:f);a.by=RV.ini;a.at=today();persistDraft();render();toast(a.f?'\u2713 Feedback saved \u2014 '+a.f.toLowerCase()+' ('+RV.ini+')':'Feedback cleared')}
+window.setAccNote=(k,v)=>{const a=S.accuracy[k]||(S.accuracy[k]={});a.note=v;a.by=a.by||RV.ini;a.at=today();persistDraft();if(v.trim())toast('\u2713 Note saved \u2014 tribal knowledge captured');updateTopbar()}
+// Three-axis feedback taxonomy (ruling 07-14 item 4), inference-first:
+//  1. source extraction (correct/wrong/unclear) — judged against WHAT THE PO SAYS
+//  2. DB transformation (accepted/edited) — recorded automatically from behavior
+//  3. advisory usefulness (useful/noise/missing) — per FINDING, not per field
+// Untouched fields silently record correct+accepted at sign-off. An edit asks ONE question.
+const ACC_DEF={USEFUL:'Real signal — this finding/row helped',NOISE:'Wasted attention — should not have been raised',
+  WRONG:'The parser misread the source document',UNCLEAR:'Cannot tell from the documents'};
+const ACC_CLS={USEFUL:'on-ACCURATE',NOISE:'on-WRONG',WRONG:'on-WRONG',UNCLEAR:'on-MINOR'};
+function accChip(key,label,mode){const a=S.accuracy[key]||{};const opts=mode==='ext'?['WRONG','UNCLEAR']:['USEFUL','NOISE'];
+  return `<div class="acc"><span class="acc-l">${label||(mode==='ext'?'extraction':'useful?')}</span>
+    ${opts.map(f=>`<button class="acc-b ${a.f===f?ACC_CLS[f]:''}" title="${ACC_DEF[f]}" onclick="setAcc('${escA(key)}','${f}')">${f.charAt(0)+f.slice(1).toLowerCase()}</button>`).join('')}
+    <input class="acc-n" placeholder="note — what you checked / why…" value="${escA(a.note||'')}" onchange="setAccNote('${escA(key)}',this.value)">
+    ${a.by?`<span class="hint">${esc(a.by)}</span>`:''}</div>`}
+const FLAGGING={};
+window.flagFb=k=>{if(needRv())return;FLAGGING[k]=true;render()};
+window.cancelFb=k=>{delete FLAGGING[k];render()};
+window.setFb=(k,ext)=>{if(needRv())return;const f=S.scr1.fields.find(x=>x.k===k);if(!f)return;
+  const nid='fbn-'+k.replace(/[^A-Za-z0-9]/g,'_');const noteEl=document.getElementById(nid);
+  S.fb=S.fb||{};S.fb[k]={ext,xf:f.editedBy?'EDITED':'ACCEPTED',note:noteEl?noteEl.value.trim():'',by:RV.ini,at:today()};
+  delete FLAGGING[k];persistDraft();render();toast('\u2713 Recorded — extraction '+ext.toLowerCase()+(f.editedBy?' · entry edited':''))};
+function fbRow(f){const fb=S.fb&&S.fb[f.k];const nid='fbn-'+f.k.replace(/[^A-Za-z0-9]/g,'_');
+  if(fb&&!fb.auto){return `<span class="f-acc hint">feedback: extraction ${fb.ext.toLowerCase()}${fb.note?' — '+esc(fb.note):''} · entry ${fb.xf==='EDITED'?'edited':'accepted'} (${esc(fb.by||'')}) <button onclick="delete S.fb['${escA(f.k)}'];persistDraft();render()">×</button></span>`}
+  if(f.editedBy){return `<span class="f-acc"><span class="acc-l">you edited — one question:</span>
+    <button class="acc-b" title="The value on the PO is different from what the parser returned" onclick="setFb('${escA(f.k)}','WRONG')">parser misread the PO</button>
+    <button class="acc-b" title="The parser read the PO correctly — this edit is how QPC enters it in Access" onclick="setFb('${escA(f.k)}','CORRECT')">PO read right — entry preference</button>
+    <button class="acc-b" onclick="setFb('${escA(f.k)}','UNCLEAR')">can’t tell</button>
+    <input class="acc-n" id="${nid}" placeholder="optional note"></span>`}
+  if(FLAGGING[f.k]){return `<span class="f-acc"><span class="acc-l">flag extraction:</span>
+    <button class="acc-b" onclick="setFb('${escA(f.k)}','WRONG')">wrong vs the PO</button>
+    <button class="acc-b" onclick="setFb('${escA(f.k)}','UNCLEAR')">unclear</button>
+    <input class="acc-n" id="${nid}" placeholder="what the PO actually says…">
+    <button onclick="cancelFb('${escA(f.k)}')">cancel</button></span>`}
+  return `<span class="f-acc"><button class="acc-b" title="Untouched fields auto-record extraction-correct + entry-accepted at sign-off — flag only if the extraction is wrong vs the PO" onclick="flagFb('${escA(f.k)}')">⚑ flag</button></span>`}
+
+// ---- API -----------------------------------------------------------------------
+// claude-opus-4-8 pricing (USD per MTok) — cost math only; NO keys or secrets are ever stored
+const MTOK_COST={inTok:5.00,outTok:25.00,cacheRead:0.50,cacheWrite:6.25};
+function calcCost(u){return Math.round(((u.inTok||0)*MTOK_COST.inTok+(u.outTok||0)*MTOK_COST.outTok
+  +(u.cacheRead||0)*MTOK_COST.cacheRead+(u.cacheWrite||0)*MTOK_COST.cacheWrite)/1e6*10000)/10000}
+async function callClaude(system,tool,content,label){
+  BUSY.count=(BUSY.count||0)+1;BUSY.on=true;BUSY.msg=label+' \u2014 contacting API\u2026';render();
+  const _m={ms:0,inTok:0,outTok:0,cacheRead:0,cacheWrite:0,cost:0};const _t0=Date.now();
+  callClaude.last=null;
+  try{
+    let resp;
+    for(let attempt=0;;attempt++){
+      resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{
+        'content-type':'application/json','x-api-key':KEY.v,'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'},
+        body:JSON.stringify({model:'claude-opus-4-8',max_tokens:32000,stream:true,system,
+          tools:[tool],tool_choice:{type:'tool',name:tool.name},messages:[{role:'user',content}]})});
+      if(resp.ok)break;
+      if((resp.status===429||resp.status===529||resp.status===503)&&attempt<3){
+        const wait=20*(attempt+1);
+        const el=$('#busy-msg');if(el)el.textContent=label+' \u2014 rate limited, retrying in '+wait+'s\u2026';
+        await new Promise(r=>setTimeout(r,wait*1000));continue;
+      }
+      const e=await resp.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||('API error HTTP '+resp.status));
+    }
+    const reader=resp.body.getReader();const dec=new TextDecoder();let buf='',json='';
+    while(true){const{done,value}=await reader.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});let ix;
+      while((ix=buf.indexOf('\n'))>=0){const line=buf.slice(0,ix).trim();buf=buf.slice(ix+1);
+        if(!line.startsWith('data:'))continue;const d=line.slice(5).trim();if(!d||d==='[DONE]')continue;
+        let ev;try{ev=JSON.parse(d)}catch(e){continue}
+        if(ev.type==='message_start'&&ev.message&&ev.message.usage){const u=ev.message.usage;
+          _m.inTok+=u.input_tokens||0;_m.cacheRead+=u.cache_read_input_tokens||0;_m.cacheWrite+=u.cache_creation_input_tokens||0;}
+        if(ev.type==='message_delta'&&ev.usage){_m.outTok=ev.usage.output_tokens||_m.outTok;}
+        if(ev.type==='content_block_delta'&&ev.delta&&ev.delta.type==='input_json_delta'){
+          json+=ev.delta.partial_json;
+          const el=$('#busy-msg');if(el)el.textContent=label+' \u2014 reading documents & auditing\u2026 ('+Math.round(json.length/1024)+' KB of findings so far)';}
+        if(ev.type==='error')throw new Error((ev.error&&ev.error.message)||'stream error');}}
+    _m.ms=Date.now()-_t0;_m.cost=calcCost(_m);callClaude.last=_m;
+    return JSON.parse(json||'{}');
+  }finally{BUSY.count--;BUSY.on=BUSY.count>0;if(!BUSY.on)BUSY.msg='';}
+}
+const fileB64=f=>new Promise((res,rej)=>{const r=new FileReader();
+  r.onload=()=>res(String(r.result).slice(String(r.result).indexOf(',')+1));r.onerror=()=>rej(r.error);r.readAsDataURL(f)});
+const pdfBlock=b64=>({type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}});
+function contentBlockFor(doc){const n=doc.name.toLowerCase();
+  if(n.endsWith('.png'))return {type:'image',source:{type:'base64',media_type:'image/png',data:doc.b64}};
+  if(n.endsWith('.jpg')||n.endsWith('.jpeg'))return {type:'image',source:{type:'base64',media_type:'image/jpeg',data:doc.b64}};
+  if(n.endsWith('.webp'))return {type:'image',source:{type:'base64',media_type:'image/webp',data:doc.b64}};
+  return pdfBlock(doc.b64);}
+function b64bytes(b64){const bin=atob(b64);const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return u}
+
+// docx → text, in-browser (zip parse + DecompressionStream)
+async function docxToText(b64){
+  const bytes=b64bytes(b64);const dv=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  let eocd=-1;for(let i=bytes.length-22;i>=Math.max(0,bytes.length-22-65535);i--){if(dv.getUint32(i,true)===0x06054b50){eocd=i;break}}
+  if(eocd<0)throw new Error('labels file is not a valid .docx');
+  const n=dv.getUint16(eocd+10,true);let p=dv.getUint32(eocd+16,true);
+  for(let e=0;e<n;e++){if(dv.getUint32(p,true)!==0x02014b50)break;
+    const method=dv.getUint16(p+10,true),csize=dv.getUint32(p+20,true),
+      nl=dv.getUint16(p+28,true),el=dv.getUint16(p+30,true),cl=dv.getUint16(p+32,true),
+      lho=dv.getUint32(p+42,true),name=new TextDecoder().decode(bytes.subarray(p+46,p+46+nl));
+    if(name==='word/document.xml'){
+      const lnl=dv.getUint16(lho+26,true),lel=dv.getUint16(lho+28,true);
+      const comp=bytes.subarray(lho+30+lnl+lel,lho+30+lnl+lel+csize);
+      const xml=method===0?new TextDecoder().decode(comp)
+        :await new Response(new Blob([comp]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
+      return xml.split('</w:p>').map(pp=>[...pp.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map(m=>m[1]).join('')
+        .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").trim())
+        .filter(Boolean).join('\n');}
+    p+=46+nl+el+cl;}
+  throw new Error('word/document.xml not found in labels file');
+}
+
+// ---- stage engines ---------------------------------------------------------------
+// ---- extraction core (shared by single-PO and batch) ----
+// dbValue derivation per header/SCR field key (deterministic; source preserved)
+const FIELD_NORMALIZERS={shipTo:normalizeShipTo,shipMethod:normalizeShipMethod,
+  processCallOut:normalizeCallout,specialInstructions:normalizeSpecialInstructions};
+// stage timing + API usage/cost, stored WITH the instance (ruling 07-14 item 7)
+function addStageMetrics(job,stage){const m=callClaude.last;if(!m||!job)return;
+  job.metrics=job.metrics||{stages:{}};
+  const s=job.metrics.stages[stage]=job.metrics.stages[stage]||{runs:0,ms:0,inTok:0,outTok:0,cacheRead:0,cacheWrite:0,cost:0};
+  s.runs++;s.ms+=m.ms;s.inTok+=m.inTok;s.outTok+=m.outTok;s.cacheRead+=m.cacheRead;s.cacheWrite+=m.cacheWrite;
+  s.cost=Math.round((s.cost+m.cost)*10000)/10000;
+  job.metrics.totalCost=Math.round(Object.values(job.metrics.stages).reduce((a,x)=>a+x.cost,0)*10000)/10000;}
+function metricsLine(){const M=S&&S.metrics;if(!M)return '';
+  const parts=Object.entries(M.stages).map(([k,s])=>k+' '+Math.round(s.ms/1000)+'s · $'+s.cost.toFixed(2)+(s.runs>1?' ('+s.runs+' runs)':''));
+  return `<p class="hint" style="margin:2px 0">\u23f1 ${parts.join(' | ')} \u2014 job cost so far $${(M.totalCost||0).toFixed(2)}</p>`}
+function buildJobFromRaw(raw,fname,b64){
+  const job=freshInstance();job.docs.po={name:fname,b64};
+  const fields=[];
+  for(const d of DATA.scr1.woDefs){const x=(raw.wo||{})[d.key]||{};
+    const f={k:d.key,l:d.label,v:x.value||'',s:x.status||'MISSING',
+      why:(x.status!=='EXTRACTED'?(x.reason||'Not returned \u2014 verify manually.'):(x.reason||''))};
+    // three layers: v is the dbValue; src preserved whenever normalization rewrites it
+    const fn=FIELD_NORMALIZERS[d.key];
+    if(fn&&f.v){const out=fn(f.v);if(out!==f.v){f.src=f.v;f.v=out;}}
+    fields.push(f);}
+  let partsTotal=0,known=true,expedite=false;
+  (raw.lineItems||[]).forEach((li,ix)=>{const nn=(typeof li.lineNo==='number')?li.lineNo:ix+1;
+    const srcDesc=String((((li.fields||{}).description||{}).value)||'');
+    const lineIsExpedite=isExpediteLine(String((((li.fields||{}).partId||{}).value)||''),srcDesc);
+    for(const d of DATA.scr1.lineDefs){const x=(li.fields||{})[d.key]||{};
+      let v=x.value||'',st=x.status||'MISSING',why=x.reason||'';
+      if(d.key==='partId'){v='';st='MISSING';why='PartID resolves from the QPC part list in production.'}
+      const f={k:'L'+nn+'.'+d.key,l:'L'+nn+' \u00b7 '+d.label,v,s:st,why:st!=='EXTRACTED'?(why||'Not returned \u2014 verify manually.'):''};
+      if(d.key==='description'&&f.v){
+        if(lineIsExpedite){const w=waivedByFromSource(f.v);f.src=f.v;f.v=w?('WAIVED BY '+w):'';
+          f.why=w?'Waived expedite \u2014 the waiver convention is the only Description content.':'Expedite line \u2014 DB description stays EMPTY (invoicing copies descriptions verbatim; ruling 07-14).';}
+        else{const out=normalizeDescription(f.v);if(out!==f.v){f.src=f.v;f.v=out;}}}
+      if(d.key==='currentPrice'&&st==='EXTRACTED'&&f.v){
+        f.src=f.v;f.v='0.00';
+        f.why='PO states '+f.src+' \u2014 DB entry stays $0.00 until price verification closes (verified at Final Inspection).';}
+      if(lineIsExpedite&&d.key==='partId'){f.isExp=true}
+      fields.push(f);}
+    const pm=String((((li.fields||{}).currentPrice||{}).value)||'').replace(/[$,]/g,'').match(/-?\d+(\.\d+)?/);
+    const qm=String((((li.fields||{}).qty||{}).value)||'').replace(/,/g,'').match(/\d+(\.\d+)?/);
+    if(lineIsExpedite){expedite=true;return}
+    if(!pm||!qm){known=false;return} partsTotal+=parseFloat(pm[0])*parseFloat(qm[0]);});
+  job.scr1={fields,excluded:raw.excludedLines||[],
+    billing:{partsTotal:known?Math.round(partsTotal*100)/100:null,lotMin:known&&partsTotal<350,expedite}};
+  job.po=((raw.wo||{}).purchaseOrder||{}).value||'(no PO#)';
+  job.customer=((raw.wo||{}).customer||{}).value||'(no customer)';
+  job.ledger=(raw.issues||[])
+    .filter(i=>!/PRICE\s+VERIF/i.test(i.label||''))  // deterministic price item below supersedes model-raised ones
+    .map((i,ix)=>({id:'s1-'+(ix+1),label:i.label||'',cls:i.class==='HOLD'?'HOLD':'ALERT',
+      gate:GATE_ORDER.includes(i.gate)?i.gate:'SCR',tier:i.tier||3,act:i.action||'',why:i.why||'',
+      fieldRefs:Array.isArray(i.fieldRefs)?i.fieldRefs:[],from:'SCR1',state:'OPEN',res:null,audit:[]}));
+  // B1 (ruling 07-14): deterministic price-verification item on EVERY job.
+  // Blocks job close while OPEN; a documented SP0120/G1 SHIP override marks it
+  // OVERRIDDEN \u2014 OPEN (shipment permitted, verification still outstanding).
+  job.ledger.push({id:'price-1',kind:'price',label:'PRICE VERIFICATION \u2014 ROUTINE',cls:'ALERT',
+    gate:'SHIP',tier:1,act:'Verify every line price against the QPC quote / DB parts list; record the reference as evidence.',
+    why:'Price must be verified vs the QPC quote on every job. The DB copy value stays $0.00 until this closes.',
+    from:'SCR1',state:'OPEN',res:null,audit:[]});
+  return job;
+}
+async function extractJob(f){
+  const b64=await fileB64(f);
+  const raw=await callClaude(DATA.scr1.system,DATA.scr1.tool,[contentBlockFor({name:f.name,b64}),
+    {type:'text',text:'Extract this purchase order ('+f.name+'). Read every page, including scanned pages. Return every field; explain any blank with a reason. Call emit_extraction exactly once.'}],
+    'SCR1: '+f.name);
+  if(raw.status==='FAILED_INTAKE')throw new Error('Failed intake: '+(raw.intakeError||'unreadable PDF'));
+  const job=buildJobFromRaw(raw,f.name,b64);addStageMetrics(job,'SCR1');return job;
+}
+// ---- batch (up to 30 POs; each becomes its own distributable instance) ----
+const BATCH={items:[],running:false,next:0};
+async function batchWorker(){
+  while(true){const ix=BATCH.next++;if(ix>=BATCH.items.length)break;
+    const it=BATCH.items[ix];it.status='extracting';render();
+    try{it.job=await extractJob(it.f);it.status='ready';}
+    catch(e){it.status='failed';it.error=e.message}
+    render();}
+}
+async function startBatch(files){
+  BATCH.items=files.map((f,i)=>({id:'b'+(i+1),f,name:f.name,status:'queued',job:null,error:null}));
+  BATCH.next=0;BATCH.running=true;S=null;render();
+  toast('Batch started \u2014 '+files.length+' PO'+(files.length>1?'s':'')+', extracting 2 at a time');
+  await Promise.all(Array.from({length:Math.min(2,BATCH.items.length)},()=>batchWorker()));
+  BATCH.running=false;render();
+  const ok=BATCH.items.filter(i=>i.status==='ready').length;
+  toast('Batch complete \u2014 '+ok+'/'+BATCH.items.length+' extracted');
+}
+window.openBatchItem=ix=>{S=BATCH.items[ix].job;persistDraft();render()};
+window.saveBatchItem=ix=>{saveInstance(BATCH.items[ix].job)};
+window.saveAllBatch=()=>{let n=0;for(const it of BATCH.items){if(it.job){saveInstance(it.job);n++}}
+  toast('\u2713 '+n+' instance file'+(n===1?'':'s')+' downloaded \u2014 distribute them')};
+window.retryBatchItem=async ix=>{const it=BATCH.items[ix];it.status='extracting';it.error=null;render();
+  try{it.job=await extractJob(it.f);it.status='ready'}catch(e){it.status='failed';it.error=e.message}render()};
+window.clearBatch=()=>{if(BATCH.items.some(i=>i.job&&i.job.stage==='SCR1')&&!confirm('Some POs are not signed off / saved. Clear the batch anyway?'))return;
+  BATCH.items=[];S=null;render()};
+window.backToBatch=()=>{S=null;render()};
+window.addEventListener('beforeunload',e=>{
+  if(BATCH.running||BATCH.items.some(i=>i.job&&i.job.stage==='SCR1')){e.preventDefault();e.returnValue=''}});
+// ---- single/staged entry ----
+window.stageBatchInput=inp=>{let fs=[...inp.files];if(!fs.length)return;
+  if(fs.length>30){alert('Max 30 POs per batch \u2014 taking the first 30.');fs=fs.slice(0,30)}
+  PENDING.newPo=fs;render()};
+window.startScr1Staged=async btn=>{const fs=PENDING.newPo;if(!fs||!fs.length)return;
+  if(!KEY.v){alert('Activate the API key first.');return}
+  btn.disabled=true;btn.textContent='Starting\u2026';delete PENDING.newPo;
+  if(fs.length===1){
+    toast('\u2713 PO submitted \u2014 '+fs[0].name);
+    try{S=await extractJob(fs[0]);persistDraft();render();}
+    catch(e){render();alert('SCR1 extraction failed: '+e.message)}
+  } else { startBatch(fs); }
+};
+const PENDING={};
+const SLOT_LABEL={po:'PO',traveler:'Traveler',labels:'Labels',print:'Print',coc:'COC draft',packSlip:'Pack slip'};
+window.stageDoc=(inp,slot)=>{const f=inp.files[0];if(!f)return;
+  if(!INTAKE.images&&/\.(png|jpe?g|webp|heic|gif|bmp|tiff?)$/i.test(f.name)){
+    alert('Photo/image intake is disabled pending the export-control & data-handling ruling — upload a PDF scan instead.');inp.value='';return}
+  if(/\.heic$/i.test(f.name)){alert('HEIC photos are not supported by the API \u2014 convert to JPG (iPhone: share \u2192 save as JPG, or Settings \u2192 Camera \u2192 Formats \u2192 Most Compatible).');inp.value='';return}
+  if(f.size>15*1024*1024){alert('File over 15 MB — scan at lower resolution.');inp.value='';return}
+  PENDING[slot]=f;render()};
+window.cancelStage=slot=>{delete PENDING[slot];render()};
+const EDITING={};
+window.editField=k=>{if(!RV.ini){alert('Set your name/initials at the top first — edits must be attributable.');return}EDITING[k]=true;render()};
+window.cancelEditField=k=>{delete EDITING[k];render()};
+window.saveField=(k,btn)=>{const ta=btn.parentElement.querySelector('textarea');const nv=ta.value;
+  const f=S.scr1.fields.find(x=>x.k===k);if(!f)return;
+  if(nv===f.v){delete EDITING[k];render();return}
+  if(f.orig===undefined)f.orig=f.v;
+  f.v=nv;f.editedBy=RV.ini;f.editedAt=today();
+  if(f.s!=='EXTRACTED'&&f.s!=='NOT_APPLICABLE'){f.s='EXTRACTED';f.why='';f.statusOverridden=true}
+  S.verified[k]=false;delete EDITING[k];persistDraft();render();
+  toast('✎ Field edited — re-verify before copy ('+RV.ini+')')};
+window.submitDoc=async(slot,btn)=>{const f=PENDING[slot];if(!f)return;
+  btn.disabled=true;btn.textContent='Uploading…';
+  try{S.docs[slot]={name:f.name,b64:await fileB64(f)};delete PENDING[slot];persistDraft();render();
+    toast('✓ '+(SLOT_LABEL[slot]||slot)+' uploaded — '+f.name);
+  }catch(e){btn.disabled=false;btn.textContent='Submit upload';alert('Could not read the file: '+e.message)}};
+window.uploadDoc=async(inp,slot)=>{window.stageDoc(inp,slot)};
+
+window.runScr2=async()=>{
+  if(!KEY.v){alert('Activate the API key first.');return}
+  const D=S.docs;
+  if(!D.po){alert('SCR2 refuses to run without the current PO — the PO is the comparison authority.');return}
+  if(!D.traveler){alert('SCR2 needs the completed traveler. (Labels are generated at SCR2 and verified at Final Inspection.)');return}
+  try{
+    const content=[{type:'text',text:'DOCUMENT 1 — CURRENT PO (PO v1, the comparison authority):'},contentBlockFor(D.po),
+      {type:'text',text:'DOCUMENT 2 — COMPLETED TRAVELER (TRAVELER v1, audit subject):'},contentBlockFor(D.traveler)];
+    if(D.print){content.push({type:'text',text:'DOCUMENT 3 — PART PRINT (PRINT v1) — CROSS-REFERENCE ONLY, never authority:'},contentBlockFor(D.print));}
+    content.push({type:'text',text:'Audit the traveler against the PO. Read every page. Call emit_scr2 exactly once.'});
+    const raw=await callClaude(DATA.scr2.system,DATA.scr2.tool,content,'SCR2 audit');addStageMetrics(S,'SCR2');
+    S.scr2Report={travelerComparison:raw.travelerComparison||[],
+      summary:raw.summary||'',analyzedAt:new Date().toISOString()};
+    const seenNew=new Set(); // within-response exact-fingerprint dedupe only
+    (raw.discrepancies||[]).forEach((d,ix)=>{
+      const disp=findDisposition(d.label||'',d.field||'',d.poValue||'',d.foundValue||'');
+      if(disp){(disp.carried=disp.carried||[]).push({stage:'SCR2',at:new Date().toISOString()});return}
+      if(findExisting(d.label||'',d.field||'',d.poValue||'',d.foundValue||''))return; // already tracked (open/resolved)
+      const fpKey=norm(d.label||'')+'|'+norm(d.field||'')+'|'+norm(d.poValue||'')+'|'+norm(d.foundValue||'');
+      if(seenNew.has(fpKey))return;seenNew.add(fpKey);
+      S.ledger.push({id:'s2-'+(ix+1),label:d.label||'',field:d.field||'',cls:d.class==='HOLD'?'HOLD':'ALERT',
+        gate:GATE_ORDER.includes(d.gate)?d.gate:'PACKAGING',tier:d.tier||3,act:d.action||'',why:d.why||'',
+        from:'SCR2',poValue:d.poValue||'',foundValue:d.foundValue||'',corrected:d.correctedValue||'',
+        ise:d.internalSourceEligible===true,state:'OPEN',res:null,audit:[]});});
+    persistDraft();render();
+  }catch(e){render();alert('SCR2 audit failed: '+e.message)}
+};
+window.runFi=async()=>{
+  if(!KEY.v){alert('Activate the API key first.');return}
+  const D=S.docs;
+  if(!D.po){alert('Final Inspection refuses to run without the current PO.');return}
+  if(!D.coc||!D.packSlip||!D.labels){alert('Final Inspection needs the COC draft, the pack slip, and the generated labels (labels are made at SCR2, verified here).');return}
+  try{
+    const content=[{type:'text',text:'DOCUMENT 1 — CURRENT PO (PO v1, the comparison authority):'},contentBlockFor(D.po),
+      {type:'text',text:'DOCUMENT 2 — COC DRAFT (COC v1, audit subject):'},contentBlockFor(D.coc),
+      {type:'text',text:'DOCUMENT 3 — PACK SLIP (PACK_SLIP v1, audit subject):'},contentBlockFor(D.packSlip)];
+    if(D.traveler){content.push({type:'text',text:'DOCUMENT 4 — COMPLETED TRAVELER (TRAVELER v1, consistency reference for the pack slip; PO still governs):'},contentBlockFor(D.traveler));}
+    if(D.labels.name.toLowerCase().endsWith('.docx')){
+        content.push({type:'text',text:'DOCUMENT 5 — GENERATED LABELS (LABELS v1), extracted text (labels appear sequentially, one block per label):\n\n'+await docxToText(D.labels.b64)});
+      }else{content.push({type:'text',text:'DOCUMENT 5 — GENERATED LABELS (LABELS v1):'},contentBlockFor(D.labels));}
+    content.push({type:'text',text:'Audit the COC draft, pack slip, and labels (and traceability across all documents) against the PO. Call emit_final_inspection exactly once.'});
+    const raw=await callClaude(DATA.fi.system,DATA.fi.tool,content,'Final Inspection audit');addStageMetrics(S,'FI');
+    S.fiReport={cocChecks:raw.cocChecks||[],packSlipChecks:raw.packSlipChecks||[],
+      labels:raw.labels||[],labelCoverage:raw.labelCoverage||{expectedUnits:[],labeledUnits:[],missing:[],extra:[]},
+      traceability:(raw.traceability||[]).map(r=>({...r,consistent:r.consistent==='YES'})),
+      summary:raw.summary||'',analyzedAt:new Date().toISOString()};
+    const seenNew=new Set(); // within-response exact-fingerprint dedupe only
+    (raw.discrepancies||[]).forEach((d,ix)=>{
+      const disp=findDisposition(d.label||'',d.field||'',d.poValue||'',d.foundValue||'');
+      if(disp){(disp.carried=disp.carried||[]).push({stage:'FI',at:new Date().toISOString()});return}
+      if(findExisting(d.label||'',d.field||'',d.poValue||'',d.foundValue||''))return; // already tracked (open/resolved)
+      const fpKey=norm(d.label||'')+'|'+norm(d.field||'')+'|'+norm(d.poValue||'')+'|'+norm(d.foundValue||'');
+      if(seenNew.has(fpKey))return;seenNew.add(fpKey);
+      S.ledger.push({id:'fi-'+(ix+1),label:d.label||'',field:d.field||'',cls:d.class==='HOLD'?'HOLD':'ALERT',
+        gate:GATE_ORDER.includes(d.gate)?d.gate:'FINAL INSPECTION',tier:d.tier||3,act:d.action||'',why:d.why||'',
+        from:'FI',poValue:d.poValue||'',foundValue:d.foundValue||'',corrected:d.correctedValue||'',state:'OPEN',res:null,audit:[]});});
+    persistDraft();render();
+  }catch(e){render();alert('Final Inspection audit failed: '+e.message)}
+};
+
+// ---- ledger (state machine: OPEN / DEFERRED / OVERRIDDEN — OPEN / RESOLVED) ------
+// Notes NEVER change state. Resolution requires a structured outcome + evidence
+// ("done" cannot resolve an item). Gate moves are audited. Rulings 2026-07-14.
+// Client-side SCR2/FI disposition matching (ruling 07-14 item 2): the model
+// re-derives cold — dispositions, notes, and profile records NEVER enter a
+// prompt. A re-raised finding that matches a recorded disposition renders as
+// PREVIOUSLY DISPOSITIONED — CARRIED FORWARD instead of a new finding.
+const DISPOSED_STATES=['DEFERRED','OVERRIDDEN','APPLIED FROM VERIFIED PROFILE','SATISFIED BY CUSTOMER PROFILE'];
+// Finding fingerprint (r3, Tyler's inspection 07-14): label matching is
+// EVIDENCE-AWARE. When both findings carry comparable structured evidence
+// (field / PO value / found value), the evidence must agree — a matching
+// label never overrides a different field, PO value, or found value (a new
+// SHIP METHOD MISMATCH with a changed found value stays a NEW item). A
+// reworded label carries forward only when field+PO+found all match.
+// DOCUMENTED FALLBACK: label-only carry-forward applies only when either
+// side genuinely lacks comparable structured evidence (legacy/SCR1-raised
+// items carry no field/poValue/foundValue).
+// r4 fingerprint: `field` is a LOCATOR, not substantive evidence. An evidence
+// match requires the same non-empty field, the same PO value, and the same
+// found value, with at least one substantive value (PO/found) non-empty —
+// field-only matching with blank PO+found values is never permitted. The
+// label-only fallback applies ONLY to explicitly recognized legacy stored
+// items (SCR1-raised / migration-backfilled / catch-up-created origins, which
+// never carry structured evidence). Modern SCR2/FI items never qualify.
+function fingerprintMatch(i,key,f,po,fo){
+  const iF=norm(i.field||''),iPo=norm(i.poValue||''),iFo=norm(i.foundValue||'');
+  if(f&&iF===f&&iPo===po&&iFo===fo&&(po||fo))return true;
+  const legacyStored=(i.from==='SCR1'||i.from==='MIGRATION'||i.from==='CATCH-UP')&&!iPo&&!iFo;
+  if(norm(i.label)===key)return legacyStored;
+  return false;}
+function findDisposition(label,field,poValue,foundValue){
+  const key=norm(label),f=norm(field||''),po=norm(poValue||''),fo=norm(foundValue||'');
+  return S.ledger.find(i=>{const st=i.state||(i.res?'RESOLVED':'OPEN');
+    const disposed=DISPOSED_STATES.includes(st)||(st==='RESOLVED'&&i.res&&i.res.outcome==='INTERNAL CONTROLLED SOURCE');
+    return disposed&&fingerprintMatch(i,key,f,po,fo);});}
+// Re-run dedupe against NON-DISPOSED items only (OPEN / plain RESOLVED) — the
+// old label-only Set silently swallowed genuinely new same-label findings.
+// Disposed items are exclusively findDisposition's territory under the strict
+// r4 fingerprint: a blank-evidence exact match NEVER carries into a
+// disposition. For non-disposed items, an EXACT re-emission (label+field+PO+
+// found all equal, blanks included) or a substantive fingerprint match is the
+// same already-visible finding — skipping it duplicates nothing and hides
+// nothing, because the item is still on the ledger gating the job.
+function findExisting(label,field,poValue,foundValue){
+  const key=norm(label),f=norm(field||''),po=norm(poValue||''),fo=norm(foundValue||'');
+  return S.ledger.find(i=>{const st=i.state||(i.res?'RESOLVED':'OPEN');
+    const disposed=DISPOSED_STATES.includes(st)||(st==='RESOLVED'&&i.res&&i.res.outcome==='INTERNAL CONTROLLED SOURCE');
+    if(disposed)return false;
+    if(norm(i.label)===key&&norm(i.field||'')===f&&norm(i.poValue||'')===po&&norm(i.foundValue||'')===fo)return true;
+    return fingerprintMatch(i,key,f,po,fo);});}
+const L_OUTCOMES=['CORRECTED','VERIFIED — COMPLIES','NOT APPLICABLE — DOCUMENTED'];
+function lit(id){return S.ledger.find(x=>x.id===id)}
+function lAudit(it,what,by,detail){(it.audit=it.audit||[]).push({at:new Date().toISOString(),what,by,detail:detail||''})}
+function effGate(i){return (i.state==='DEFERRED'&&i.deferredTo)?i.deferredTo:i.gate}
+window.addLNote=(id,btn)=>{
+  const f=btn.parentElement,note=f.children[0].value.trim(),by=f.children[1].value.trim();
+  if(!note||!by){alert('A note needs text AND initials.');return}
+  const it=lit(id);(it.notes=it.notes||[]).push({note,by,date:today()});
+  persistDraft();render();toast('✓ Note added — notes never change the state; item stays '+(it.state||'OPEN'))};
+window.resolveL=(id,btn)=>{
+  const f=btn.closest('.rform');const it=lit(id);
+  const outcome=f.querySelector('select').value;
+  const note=f.querySelector('input.ev').value.trim();
+  const srcIn=f.querySelector('input.icsrc');const src=srcIn?srcIn.value.trim():'';
+  const by=f.querySelector('input.ini').value.trim();
+  if(!by){alert('Initials are required.');return}
+  if(isVagueClosure(note)){alert('"'+(note||'')+'" cannot resolve an item — state WHAT was verified/corrected and the supporting evidence (spec-folder ref, quote ref, which field was fixed…).');return}
+  if(outcome==='INTERNAL CONTROLLED SOURCE'&&!src){alert('Internal-controlled-source acceptance requires the controlled source (e.g. F079 / controlled spec folder + doc ref) — provenance is mandatory.');return}
+  it.res={outcome,note,src:src||undefined,by,date:today()};it.state='RESOLVED';
+  lAudit(it,'RESOLVED — '+outcome,by,note+(src?' [source: '+src+']':''));
+  persistDraft();render();toast(outcome==='INTERNAL CONTROLLED SOURCE'?'✓ Accepted — internal controlled source recorded ('+by+')':'✓ Closed — '+outcome.toLowerCase()+' ('+by+')')};
+window.deferL=(id,btn)=>{
+  const f=btn.closest('.rform');const it=lit(id);
+  const gate=f.querySelector('select').value,reason=f.querySelector('input.ev').value.trim(),by=f.querySelector('input.ini').value.trim();
+  if(!reason||!by){alert('Deferral requires a reason AND initials.');return}
+  it.state='DEFERRED';it.deferredTo=gate;
+  lAudit(it,'DEFERRED to '+gate,by,reason);
+  persistDraft();render();toast('✓ Deferred to '+gate+' — stays visible at every later stage and closes at that gate')};
+window.reassignL=(id,btn)=>{
+  const f=btn.closest('.rform');const it=lit(id);
+  const gate=f.querySelector('select').value,reason=f.querySelector('input.ev').value.trim(),by=f.querySelector('input.ini').value.trim();
+  if(!reason||!by){alert('Gate reassignment requires a reason AND initials — the move is audited.');return}
+  if(gate===it.gate){alert('Already gated at '+gate+'.');return}
+  lAudit(it,'GATE REASSIGNED '+it.gate+' → '+gate,by,reason);it.gate=gate;
+  persistDraft();render();toast('✓ Gate reassigned — audited, history preserved')};
+window.overrideL=(id,btn)=>{
+  const f=btn.closest('.ovform');const it=lit(id);
+  const approver=f.querySelector('input.appr').value.trim();
+  const reason=f.querySelector('input.ev').value.trim();
+  const accessRef=f.querySelector('input.aref').value.trim();
+  const by=f.querySelector('input.ini').value.trim();
+  if(!approver||!reason||!by){alert('The override record requires the approver’s name, the approval reason, and your initials.');return}
+  if(!accessRef){alert('SHIP stays blocked without a documented Access approval reference — the approval artifact lives in Access (the system of record); FSCR records only its reference.');return}
+  it.state='OVERRIDDEN';it.override={approver,reason,accessRef,at:new Date().toISOString(),by};
+  lAudit(it,'SHIP OVERRIDE recorded (authorization governed by SP0120/G1, not FSCR)',by,'approver '+approver+' · Access ref '+accessRef+' · '+reason);
+  persistDraft();render();toast('⚠ Override recorded — shipment permitted; the item remains OVERRIDDEN — OPEN for follow-up')};
+window.copyVal=(btn,val)=>{navigator.clipboard&&navigator.clipboard.writeText(val);
+  const t=btn.textContent;btn.textContent='✓ Copied';btn.disabled=true;setTimeout(()=>{btn.textContent=t;btn.disabled=false},1200)};
+function gateSelect(sel){return '<select>'+GATE_ORDER.map(g=>'<option'+(g===sel?' selected':'')+'>'+g+'</option>').join('')+'</select>'}
+function ledgerCard(i,showResolve){
+  const st=i.state||(i.res?'RESOLVED':'OPEN');
+  const ics=i.res&&i.res.outcome==='INTERNAL CONTROLLED SOURCE';
+  const badge=st==='RESOLVED'?(ics?'<span class="badge b-navy">INTERNAL CONTROLLED SOURCE</span>':'<span class="badge b-ok">RESOLVED</span>')
+    :st==='OVERRIDDEN'?'<span class="badge b-alert">OVERRIDDEN — OPEN</span>'
+    :st==='DEFERRED'?`<span class="badge b-navy">DEFERRED → ${esc(i.deferredTo||i.gate)}</span>`
+    :`<span class="badge ${i.cls==='HOLD'?'b-hold':'b-alert'}">${i.cls}</span>`;
+  const outcomes=(i.kind==='price')?['PRICE VERIFIED']:(i.ise?L_OUTCOMES.concat(['INTERNAL CONTROLLED SOURCE']):L_OUTCOMES);
+  return `<div class="issue ${st==='RESOLVED'?'res':i.cls==='HOLD'?'hold':'alert'}">
+    ${badge}${i.legacyUnaudited?' <span class="badge b-alert">LEGACY — UNAUDITED</span>':''}${(i.carried&&i.carried.length)?` <span class="badge b-navy">PREVIOUSLY DISPOSITIONED — CARRIED FORWARD (${esc(i.carried[i.carried.length-1].stage)})</span>`:''}
+    <span class="lab">${esc(i.label)}</span>
+    <span class="meta">${st==='RESOLVED'?`${esc(i.res.outcome||'')} · ${esc(i.res.by)} · ${i.res.date} · ${esc(i.res.note)}${i.res.src?' · source: '+esc(i.res.src):''}`
+      :st==='OVERRIDDEN'?`override: ${esc(i.override?.approver||'')} · Access ref ${esc(i.override?.accessRef||'')} · ${esc((i.override?.at||'').slice(0,10))} · recorded by ${esc(i.override?.by||'')} — verification still outstanding`
+      :`${st} · raised at ${i.from} · gate ${esc(effGate(i))} · T${i.tier}`}</span>
+    ${st!=='RESOLVED'&&i.act?`<span class="act">Action: ${esc(i.act)}${i.why?' — '+esc(i.why):''}</span>`:''}
+    ${(i.fieldRefs&&i.fieldRefs.length)?`<span class="act hint">fields: ${i.fieldRefs.map(esc).join(' · ')}</span>`:''}
+    ${st!=='RESOLVED'&&i.poValue?`<span class="act">PO: <code class="copyval mono">${esc(i.poValue)}</code> · found: <code class="copyval mono">${esc(i.foundValue)}</code></span>`:''}
+    ${st!=='RESOLVED'&&i.corrected?`<span class="act">Corrected value: <code class="copyval mono">${esc(i.corrected)}</code>
+      <button onclick="copyVal(this,${JSON.stringify(i.corrected).replace(/"/g,'&quot;').replace(/</g,'&lt;')})">Copy</button></span>`:''}
+    ${i.ise&&st!=='RESOLVED'?`<span class="act" style="color:var(--gold-deep)">PO is silent on this value — acceptable ONLY as an internal controlled source with recorded provenance (resolve with that outcome), per QPC practice. A PO-stated conflict could never be accepted this way.</span>`:''}
+    ${(i.notes&&i.notes.length)?i.notes.map(n=>`<span class="act" style="color:var(--gold-deep)">📝 ${esc(n.note)} — ${esc(n.by)} ${n.date}</span>`).join(''):''}
+    ${accChip('adv::'+i.id,'advisory useful?')}
+    ${(i.audit&&i.audit.length)?`<details style="font-size:10px;margin-top:2px"><summary class="hint">history (${i.audit.length})</summary>${i.audit.map(a=>`<div class="hint">${esc((a.at||'').slice(0,16).replace('T',' '))} · ${esc(a.what)} — ${esc(a.by||'')}${a.detail?' · '+esc(a.detail):''}</div>`).join('')}</details>`:''}
+    ${st!=='RESOLVED'&&showResolve?`<div class="rform"><input placeholder="Add a note — never changes the state; carries forward (context, print findings, partial info)">
+      <input class="ini" placeholder="Initials" value="${escA(RV.ini)}">
+      <button onclick="addLNote('${i.id}',this)">📝 Note (state unchanged)</button></div>`:''}
+    ${st!=='RESOLVED'&&showResolve?`<div class="rform"><select>${outcomes.map(o=>`<option>${o}</option>`).join('')}</select>
+      <input class="ev" placeholder="Evidence — what was corrected/verified and where (required; 'done' is rejected)">
+      ${i.ise?`<input class="icsrc" placeholder="Controlled source (F079 / spec folder + doc ref)" style="width:220px">`:''}
+      <input class="ini" placeholder="Initials" value="${escA(RV.ini)}">
+      <button class="primary" onclick="resolveL('${i.id}',this)">Resolve</button></div>`:''}
+    ${st!=='RESOLVED'&&showResolve&&i.kind==='price'?`<div class="ovform rform" style="border-top:1px dashed var(--line);padding-top:6px">
+      <span class="hint" style="flex-basis:100%">SHIP override — authorization is governed by SP0120/G1 (not this tool). The approval artifact must be documented in Access; enter its reference. Shipment is permitted but verification stays open.</span>
+      <input class="appr" placeholder="Approver name">
+      <input class="ev" placeholder="Approval reason">
+      <input class="aref" placeholder="Access record / reference (required)">
+      <input class="ini" placeholder="Your initials" value="${escA(RV.ini)}">
+      <button onclick="overrideL('${i.id}',this)">Record override</button></div>`:''}
+    ${st!=='RESOLVED'&&showResolve?`<details style="font-size:11px;margin-top:2px"><summary class="hint">Defer / reassign gate (audited)</summary>
+      <div class="rform">${gateSelect(i.deferredTo||i.gate)}
+        <input class="ev" placeholder="Reason (required)"><input class="ini" placeholder="Initials" value="${escA(RV.ini)}">
+        <button onclick="deferL('${i.id}',this)">Defer to gate</button></div>
+      <div class="rform">${gateSelect(i.gate)}
+        <input class="ev" placeholder="Reason — why was it misgated (required)"><input class="ini" placeholder="Initials" value="${escA(RV.ini)}">
+        <button onclick="reassignL('${i.id}',this)">Reassign gate</button></div></details>`:''}
+  </div>`}
+function ledgerSection(showActions){
+  const active=S.ledger.filter(i=>(i.state||(i.res?'RESOLVED':'OPEN'))!=='RESOLVED');
+  const resolved=S.ledger.filter(i=>(i.state||(i.res?'RESOLVED':'OPEN'))==='RESOLVED');
+  return (active.map(i=>ledgerCard(i,showActions)).join('')||'<p class="note" style="color:var(--ok)">✓ No open, deferred, or overridden items.</p>')
+    +(resolved.length?`<details style="margin-top:6px"><summary class="hint">${resolved.length} resolved item${resolved.length===1?'':'s'} (documented outcomes travel with the job)</summary>${resolved.map(i=>ledgerCard(i,false)).join('')}</details>`:'')}
+function openBlocking(stage){const mx=STAGE_MAX[stage];
+  return S.ledger.filter(i=>{const st=i.state||(i.res?'RESOLVED':'OPEN');
+    return (st==='OPEN'||st==='DEFERRED')&&GATE_ORDER.indexOf(effGate(i))<=mx})}
+function distinct(ini,name){for(const s of S.signoffs){if(norm(s.ini)===norm(ini)||norm(s.name)===norm(name))return s.stage}return null}
+function needRv(){if(!RV.ini||!RV.name){alert('Set your name and initials at the top first.');return true}return false}
+
+// ---- gates -----------------------------------------------------------------------
+window.gateSCR1=()=>{if(needRv())return;
+  const wv=validateWo($('#g-wo').value);if(!wv.ok){alert(wv.reason);return}
+  const wo=$('#g-wo').value.trim();
+  const blk1=openBlocking('SCR1');if(blk1.length){alert('Refused: '+blk1.length+' OPEN/DEFERRED item(s) gate at or before SCR.');return}
+  const unanswered=S.scr1.fields.filter(f=>f.editedBy&&!(S.fb&&S.fb[f.k]));
+  if(unanswered.length){alert('Answer the one-question feedback on your '+unanswered.length+' edited field(s) first: did the parser misread the PO, or was the edit your entry preference?');return}
+  S.fb=S.fb||{};for(const f of S.scr1.fields){if(!S.fb[f.k]&&!f.editedBy){S.fb[f.k]={ext:'CORRECT',xf:'ACCEPTED',auto:true,at:today()}}}
+  S.wo=wo.toUpperCase();S.signoffs.push({stage:'SCR1',name:RV.name,ini:RV.ini,date:today()});S.stage='SCR2';
+  saveInstance();render()};
+window.gateSCR2=()=>{if(needRv())return;
+  const clash=distinct(RV.ini,RV.name);
+  if(clash){alert('Refused: the SCR2 reviewer must differ from the '+clash+' reviewer. Independence is a hard rule.');return}
+  if(!S.labelAttest){alert('SCR2 sign-off requires the label attestation — labels are GENERATED in Access at SCR2 and verified at Final Inspection.');return}
+  const blk2=openBlocking('SCR2');if(blk2.length){alert('Refused: '+blk2.length+' OPEN/DEFERRED item(s) gate at or before packaging.');return}
+  S.signoffs.push({stage:'SCR2',name:RV.name,ini:RV.ini,date:today()});S.stage='FI';
+  saveInstance();render()};
+window.gateFI=()=>{if(needRv())return;
+  const clash=distinct(RV.ini,RV.name);
+  if(clash){alert('Refused: the Final Inspection reviewer must differ from the '+clash+' reviewer — three distinct people per job.');return}
+  const blkF=openBlocking('FI');if(blkF.length){alert('Refused: '+blkF.length+' OPEN/DEFERRED ledger item(s) block closing — resolve them, or (price verification only) record a documented SP0120/G1 SHIP override.');return}
+  S.signoffs.push({stage:'FI',name:RV.name,ini:RV.ini,date:today()});S.stage='CLOSED';
+  saveInstance();clearDraft();render()};
+window.setCheck=(k,v)=>{S.checklist[k]=v;persistDraft();render()}
+window.attestLabels=cb=>{if(cb.checked){if(needRv()){cb.checked=false;return}
+    S.labelAttest={by:RV.ini,name:RV.name,at:new Date().toISOString()};toast('✓ Label attestation recorded — Final Inspection verifies them')}
+  else{S.labelAttest=null}
+  persistDraft();render()}
+window.exportFeedback=()=>{
+  const fb={schema:'qpc.fscr.beta.feedback/v2',exportedAt:new Date().toISOString(),
+    ratingSemantics:'v2 three-axis taxonomy (extraction vs-source / transformation accepted-edited / advisory usefulness). Pre-cutover v1 ratings were collected as satisfaction opinions — calibration-only.',
+    po:S.po,wo:S.wo,customer:S.customer,signoffs:S.signoffs,accuracy:S.accuracy,
+    fieldFeedback:S.fb||{},missingAdvisories:S.missingAdvisories||[],metrics:S.metrics||null,
+    customerNotes:S.customerNotes||[],
+    labelAttest:S.labelAttest||null,
+    ledger:S.ledger.map(i=>({label:i.label,cls:i.cls,gate:i.gate,from:i.from,state:i.state||(i.res?'RESOLVED':'OPEN'),
+      deferredTo:i.deferredTo||null,legacyUnaudited:!!i.legacyUnaudited,res:i.res,override:i.override||null,
+      notes:i.notes||[],audit:i.audit||[]}))};
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(fb,null,2)],{type:'application/json'}));
+  a.download='fscr_feedback_'+(S.wo||S.po||'job')+'.json';a.click()};
+
+// ---- views -----------------------------------------------------------------------
+function stagesBar(){const map={SCR1:0,SCR2:1,FI:2,CLOSED:3};const cur=map[S?S.stage:'SCR1'];
+  return '<div class="stages">'+['SCR1','SCR2','FINAL INSPECTION','CLOSED'].map((o,i)=>
+    `<div class="${i<cur?'done':i===cur?'on':''}">${i<cur?'✓ ':''}${o}</div>`).join('')+'</div>'}
+function busyBox(){return BUSY.on?`<div class="busy" id="busy-box">⏳ <span id="busy-msg">${esc(BUSY.msg)}</span> — a few minutes; leave this tab open.</div>`:''}
+function docCard(slot,label,required,accept){
+  const d=S.docs[slot];const pend=PENDING[slot];
+  return `<div class="doc-card${d?' doc-ok':required?' doc-missing':''}">
+    <span class="doc-type">${d?'✓ ':''}${label}${required?'':' (optional)'}</span>
+    ${d?`<span class="doc-meta mono">${esc(d.name)}</span>`
+      :pend?`<span class="doc-meta mono">staged: ${esc(pend.name)}</span>`
+      :`<span class="doc-meta">${required?'REQUIRED — not uploaded':'not uploaded'}</span>`}
+    ${S.stage!=='CLOSED'?(pend
+      ?`<span style="display:flex;gap:6px"><button class="primary" onclick="submitDoc('${slot}',this)">Submit upload</button>
+        <button onclick="cancelStage('${slot}')">Cancel</button></span>`
+      :`<input type="file" accept="${accept}" onchange="stageDoc(this,'${slot}')">`)
+    :''}
+  </div>`}
+function saveRow(){return metricsLine()+`<div class="gatebox"><button onclick="saveInstance()">💾 Save instance</button>
+  <span class="hint">Save anytime — the instance file IS the job record; pass it to the next reviewer.</span></div>`}
+function billingCard(label){const b=S.scr1&&S.scr1.billing;
+  if(!b)return `<div class="card"><b style="font-size:12px">${label}</b> · <span style="color:var(--warn)">no SCR1 pricing on this instance${S.caughtUp?' (caught up mid-stream — SCR1 was done outside FSCR)':''} — verify prices directly against the PO; the PRICE VERIFICATION ledger item still gates the job</span></div>`;
+  return `<div class="card"><b style="font-size:12px">${label}</b> · parts total ${b.partsTotal===null?'unreadable — manual lot-min check':'$'+b.partsTotal.toFixed(2)}
+   · ${b.lotMin?'<span class="badge b-alert">LOT MIN 7330 NEEDED</span>':'lot minimum not required'}
+   · ${b.expedite?'<span class="badge b-navy">EXPEDITE</span>':'no expedite'}</div>`}
+window.addCNote=btn=>{if(needRv())return;const inp=btn.parentElement.querySelector('input');const t=inp.value.trim();
+  if(!t){alert('Write the note first.');return}
+  (S.customerNotes=S.customerNotes||[]).push({note:t,customer:S.customer,by:RV.ini,date:today(),stage:S.stage});
+  inp.value='';persistDraft();render();toast('✓ Customer note proposed — rides with the instance into the rulebook loop')};
+function cnCard(){const list=S.customerNotes||[];
+  return `<div class="card"><b style="font-size:12px">Propose a customer note</b>
+    <span class="hint">— tribal knowledge: what is NORMAL for ${esc(S.customer)} that the tool should stop flagging (it never overrides the PO). Collected notes get encoded into the rulebook.</span>
+    ${list.map(n=>`<div class="hint" style="margin-top:4px">📌 ${esc(n.note)} — ${esc(n.by)} ${n.date} (${esc(n.stage)})</div>`).join('')}
+    ${S.stage!=='CLOSED'?`<div class="rform" style="margin-top:6px"><input placeholder="e.g. this customer never sends prints — don't flag it">
+    <button onclick="addCNote(this)">Propose note</button></div>`:''}
+    ${(S.missingAdvisories||[]).filter(m=>m.stage===S.stage).map(m=>`<div class="hint" style="margin-top:4px">⚠ missing advisory: ${esc(m.note)} — ${esc(m.by)} ${m.date}</div>`).join('')}
+    ${S.stage!=='CLOSED'?`<div class="rform" style="margin-top:6px"><input placeholder="Missing advisory — what SHOULD have been flagged at this stage but wasn't">
+    <button onclick="addMissing(this)">Report missing</button></div>`:''}</div>`}
+window.addMissing=btn=>{if(needRv())return;const inp=btn.parentElement.querySelector('input');const t=inp.value.trim();
+  if(!t){alert('Describe what should have been flagged.');return}
+  (S.missingAdvisories=S.missingAdvisories||[]).push({note:t,stage:S.stage,by:RV.ini,date:today()});
+  inp.value='';persistDraft();render();toast('\u2713 Missing advisory recorded — feeds the next tuning pass')};
+
+function viewLanding(){
+  let draft=null;try{draft=localStorage.getItem('fscr.beta.draft')}catch(e){}
+  return `<h2 style="margin-top:26px">FSCR Beta — real contract review, file-based instances</h2>
+  <p class="note">Live AI at every stage: SCR1 extracts the PO · SCR2 audits the completed traveler + labels against the PO ·
+  Final Inspection audits the COC + pack slip. Each stage saves an <b>instance file</b> that carries the job (documents included)
+  to the next reviewer — three different people per job, enforced. Rate every field and audit row; the collected instances are the
+  feedback loop.</p>
+  ${stagesBar()}
+  <div class="sec"><h3>1 · API key</h3><span class="rule"></span></div>
+  <div class="card">${KEY.v
+    ? `🟢 <b>API active.</b> <button onclick="KEY.v=null;render()" style="margin-left:8px">Deactivate</button>
+       <span class="hint" style="margin-left:8px">Key lives in this tab's memory only — never saved into files.</span>`
+    : `<input id="key-in" type="password" placeholder="sk-ant-…" style="width:300px">
+       <button class="primary" onclick="(function(){const k=$('#key-in').value.trim();
+         if(!/^sk-ant/.test(k)){alert('That does not look like an Anthropic API key.');return}KEY.v=k;render()})()">Activate</button>
+       <span class="hint">Needed to run extractions/audits. Loading and reading an instance works without it.</span>`}</div>
+  <div class="sec"><h3>2 · Who are you?</h3><span class="rule"></span></div>
+  ${idbar()}
+  <div class="sec"><h3>3 · Start or continue</h3><span class="rule"></span></div>
+  <div class="card"><b style="font-size:12px">New job(s) \u2014 SCR1</b><br>
+    <span class="hint">Choose 1\u201330 customer PO PDFs, then hit Extract. Each PO becomes its own job \u2014 and its own
+    instance file to distribute. Live extraction runs 2 at a time (\u22481\u20132 min per PO).</span><br><br>
+    ${PENDING.newPo
+      ?`<span class="doc-meta mono">staged: ${PENDING.newPo.length} PO${PENDING.newPo.length>1?'s':''}
+         ${PENDING.newPo.length<=5?'\u2014 '+PENDING.newPo.map(f=>esc(f.name)).join(', '):''}</span><br><br>
+        <button class="primary" ${KEY.v?'':'disabled'} onclick="startScr1Staged(this)">Extract ${PENDING.newPo.length>1?PENDING.newPo.length+' POs':'PO'} \u2192</button>
+        <button onclick="cancelStage('newPo')" style="margin-left:6px">Cancel</button>`
+      :`<input type="file" multiple accept="application/pdf" ${KEY.v?'':'disabled'} onchange="stageBatchInput(this)">`}
+    ${KEY.v?'':'<span class="hint" style="color:var(--warn)"> activate the key first</span>'}</div>
+  <div class="card"><b style="font-size:12px">Continue a job — load an instance</b><br>
+    <span class="hint">Someone handed you an instance file (SCR2 or Final Inspection duty).</span><br><br>
+    <input type="file" accept=".json" onchange="loadFile(this)"></div>
+  <div class="card"><b style="font-size:12px">Catch up a mid-stream job — enter at SCR2 or Final Inspection</b><br>
+    <span class="hint">The job started outside FSCR (SCR1 done on paper / straight into Access) and there is no instance
+    file. Enter its context — prior sign-offs are recorded as outside-FSCR, and reviewer independence is still enforced
+    against those initials. You upload the documents (PO, traveler, COC…) on the stage screen.</span><br><br>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <select id="cu-stage" onchange="document.getElementById('cu-s2row').style.display=this.value==='FI'?'flex':'none'">
+        <option value="SCR2">Enter at SCR2</option><option value="FI">Enter at Final Inspection</option></select>
+      <input id="cu-wo" placeholder="WO number (from Access)" style="width:150px">
+      <input id="cu-po" placeholder="PO number" style="width:130px">
+      <input id="cu-cust" placeholder="Customer" style="width:170px">
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+      <span class="hint" style="min-width:120px">SCR1 was done by:</span>
+      <input id="cu-s1n" placeholder="Full name" style="width:170px">
+      <input id="cu-s1i" placeholder="Initials" style="width:64px">
+    </div>
+    <div id="cu-s2row" style="display:none;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+      <span class="hint" style="min-width:120px">SCR2 was done by:</span>
+      <input id="cu-s2n" placeholder="Full name" style="width:170px">
+      <input id="cu-s2i" placeholder="Initials" style="width:64px">
+    </div>
+    <div style="margin-top:10px"><button class="primary" onclick="startCatchup()">Catch up →</button>
+      <span class="hint">builds the job instance and lands on the stage screen</span></div></div>
+  ${draft?`<div class="card"><b style="font-size:12px">Resume draft</b> <span class="hint">unsaved work from this browser</span><br><br>
+    <button onclick="S=migrateInstance(JSON.parse(localStorage.getItem('fscr.beta.draft')),today());render()">Resume</button>
+    <button onclick="clearDraft();render()" style="margin-left:6px">Discard</button></div>`:''}`
+}
+
+function viewSCR1(){
+  const copyable=f=>f.s==='EXTRACTED'||f.s==='NOT_APPLICABLE';
+  const allV=S.scr1.fields.filter(copyable).every(f=>S.verified[f.k]);
+  const blocking=openBlocking('SCR1');
+  const done=S.stage!=='SCR1';
+  return `${BATCH.items.length&&S?`<div style="margin:14px 0 -6px"><button onclick="backToBatch()">\u2190 Batch queue</button></div>`:''}${stagesBar()}${busyBox()}
+  <h2>SCR1 — extract &amp; verify <span class="badge b-navy mono">PO ${esc(S.po)}</span></h2>
+  <p class="note">${esc(S.customer)} · live extraction of <span class="mono">${esc(S.docs.po?.name||'')}</span>.
+  Verify each value against the PO, copy into Access, resolve blocking issues, pass the gate. Rate anything the parser got wrong.</p>
+  ${idbar()}
+  <div class="sec"><h3>Issues → ledger</h3><span class="rule"></span></div>
+  ${S.ledger.filter(i=>i.from==='SCR1').map(i=>ledgerCard(i,!done)).join('')||'<p class="note">No issues raised.</p>'}
+  <div class="sec"><h3>DB entry — verify → copy → rate</h3><span class="rule"></span></div>
+  <div class="card">
+  ${S.scr1.fields.map(f=>`<div class="field">
+      <span class="f-label">${esc(f.l)}<small>${f.s}${f.editedBy?' · EDITED':''}</small></span>
+      ${EDITING[f.k]
+        ?`<span><textarea class="f-edit" rows="2">${esc(f.v)}</textarea>
+           <span style="display:flex;gap:6px;margin-top:4px"><button class="primary" onclick="saveField('${escA(f.k)}',this.parentElement.parentElement)">Save</button>
+           <button onclick="cancelEditField('${escA(f.k)}')">Cancel</button></span></span>`
+        :`<span class="f-val">${esc(f.v)||'—'}${f.editedBy?`<div class="f-edited">✎ edited by ${esc(f.editedBy)} — parser said: <s>${esc(f.orig??'')||'—'}</s></div>`:''}${f.src!==undefined&&f.src!==f.v?`<div class="hint" style="white-space:pre-wrap;margin-top:2px">PO states: ${esc(f.src)}</div>`:''}</span>`}
+      <span class="f-act"><label><input type="checkbox" ${S.verified[f.k]?'checked':''} ${done?'disabled':''}
+        onchange="S.verified['${escA(f.k)}']=this.checked;persistDraft();render()"> verified</label>
+        <button ${copyable(f)&&S.verified[f.k]?'':'disabled'} title="${copyable(f)?'Verify first to enable copy':'No copy for '+f.s}"
+          onclick="copyVal(this,${JSON.stringify(f.v).replace(/"/g,'&quot;').replace(/</g,'&lt;')})">Copy</button>
+        ${!done&&!EDITING[f.k]?`<button title="Edit the value — the parsed original is kept for the tuning loop" onclick="editField('${escA(f.k)}')">✎ Edit</button>`:''}</span>
+      ${(()=>{const fin=S.ledger.find(x=>(x.state||(x.res?'RESOLVED':'OPEN'))!=='RESOLVED'&&x.fieldRefs&&x.fieldRefs.includes(f.k));
+        return fin?`<span class="f-why">⚑ finding: ${esc(fin.label)}${f.why?' — '+esc(f.why):''}</span>`:(f.why?`<span class="f-why">Why: ${esc(f.why)}</span>`:'')})()}
+      ${fbRow(f)}
+    </div>`).join('')}
+  </div>
+  ${billingCard('Billing')}
+  <div class="sec"><h3>Reference documents</h3><span class="rule"></span></div>
+  <div class="doc-grid">
+    ${docCard('print','Part print',false,'application/pdf')}
+  </div>
+  <p class="note" style="margin-top:-4px">The print rides in the instance for SCR2/FI cross-reference (it never overrides the PO \u2014 note print findings on the relevant issue).</p>
+  ${cnCard()}
+  ${saveRow()}
+  <div class="sec"><h3>SCR1 stage gate</h3><span class="rule"></span></div>
+  <p class="note">Internal stage gate — the official sign-off lives in the Access DB; this mirrors it, never replaces it.</p>
+  ${done?`<div class="banner">✓ SCR1 gate passed — ${esc(S.signoffs.find(s=>s.stage==='SCR1')?.name)} (${esc(S.signoffs.find(s=>s.stage==='SCR1')?.ini)}) · WO ${esc(S.wo)} · instance downloaded — hand it to the SCR2 reviewer.</div>
+    <div class="gatebox"><button class="primary" onclick="saveInstance()">Download instance again</button>
+    <button onclick="render()" style="display:none"></button>
+    <button class="primary" onclick="render()" style="display:none"></button>
+    <button onclick="S.stage='SCR2';render()">Continue to SCR2 here →</button></div>`
+  :`<div class="gatebox">
+     <input id="g-wo" placeholder="WO number (from Access)" style="width:180px">
+     <button class="primary" ${allV&&!blocking.length&&RV.ini?'':'disabled'}
+       title="${!RV.ini?'Set your identity above':!allV?'Verify every copyable field':blocking.length?'Resolve issues gated at/before SCR':''}"
+       onclick="gateSCR1()">Sign off SCR1${RV.ini?' as '+esc(RV.ini):''}</button>
+     <span class="hint">${!allV?'Verify every copyable field to unlock.':blocking.length?blocking.length+' issue(s) gated at/before SCR block sign-off.':'Ready — enter the WO number.'}</span>
+    </div>`}`
+}
+
+function viewSCR2(){
+  const r=S.scr2Report;const done=S.stage==='FI'||S.stage==='CLOSED';
+  const blocking=openBlocking('SCR2');
+  const s1=S.signoffs.find(s=>s.stage==='SCR1');
+  return `${BATCH.items.length&&S?`<div style="margin:14px 0 -6px"><button onclick="backToBatch()">\u2190 Batch queue</button></div>`:''}${stagesBar()}${busyBox()}
+  <h2>SCR2 — audit traveler &amp; labels <span class="badge b-navy mono">${S.wo?'WO '+esc(S.wo):'PO '+esc(S.po)}</span></h2>
+  <p class="note">${esc(S.customer)} · SCR1 signed off by <b>${esc(s1?.name||'?')} (${esc(s1?.ini||'?')})</b>${s1&&s1.outside?' <span class="hint">(outside FSCR — job caught up mid-stream)</span>':''}.
+  The audit re-reads the PO — never SCR1's data — so an SCR1 error can't propagate. Labels are generated at this stage and verified at Final Inspection. You must be a different person (enforced at the gate).</p>
+  ${idbar()}
+  <div class="sec"><h3>Open ledger — travels with the job</h3><span class="rule"></span></div>
+  ${ledgerSection(!done)}
+  <div class="sec"><h3>What SCR1's parser extracted (rate parse errors you spot)</h3><span class="rule"></span></div>
+  <details><summary>${S.scr1?S.scr1.fields.length+' parsed fields — reference only; the audit re-reads the PO':(S.caughtUp?'not available — SCR1 was done outside FSCR (caught up)':'not available')}</summary>
+    ${S.scr1?`<div class="twrap" style="margin-top:8px"><table><tr><th>Field</th><th>Status</th><th>Parsed value</th><th>Parser check</th></tr>
+    ${S.scr1.fields.map(f=>`<tr><td>${esc(f.l)}</td><td><span class="st st-${f.s==='EXTRACTED'||f.s==='NOT_APPLICABLE'?'M':'W'}">${f.s}</span></td>
+      <td class="mono">${esc(f.v)||'—'}${f.src!==undefined&&f.src!==f.v?`<div class="hint">PO states: ${esc(f.src)}</div>`:''}${f.orig!==undefined&&f.orig!==f.v?`<div class="hint">parser said: ${esc(f.orig)}</div>`:''}${f.why?`<div class="hint">${esc(f.why)}</div>`:''}</td>
+      <td>${accChip('scr2::scr1parse::'+f.k,'','ext')}</td></tr>`).join('')}</table></div>`:''}</details>
+  ${billingCard('Pricing &amp; billing — carried from SCR1 (price verification closes at Final Inspection)')}
+  <div class="sec"><h3>Documents</h3><span class="rule"></span></div>
+  <div class="doc-grid">
+    ${docCard('po','Current PO',true,'application/pdf')}
+    ${docCard('traveler','Completed traveler',true,'application/pdf')}
+    ${docCard('print','Part print',false,'application/pdf')}
+  </div>
+  <div class="sec"><h3>Audit vs. PO</h3><span class="rule"></span></div>
+  ${!done?`<div class="gatebox">
+    <button class="primary" ${KEY.v&&S.docs.po&&S.docs.traveler&&!BUSY.on?'':'disabled'}
+      title="${!KEY.v?'Activate the API key on the start screen (reload without saving? save instance first)':!S.docs.traveler?'Upload the completed traveler':''}"
+      onclick="runScr2()">${r?'Re-run SCR2 audit':'Run SCR2 audit'}</button>
+    <span class="hint">${KEY.v?'The completed traveler vs the PO. Labels are generated at SCR2 and verified at Final Inspection. 2–4 minutes.':'API key required — activate on the start screen (load instance again after).'}</span></div>`:''}
+  ${r?`<p class="note" style="background:var(--navysoft);color:var(--ink);padding:10px 12px;border-radius:8px">${esc(r.summary)}</p>
+   <h2 style="font-size:13px">Traveler vs. PO</h2>
+   <div class="twrap"><table><tr><th>Field</th><th>PO (yardstick)</th><th>Traveler</th><th>Status + your rating</th></tr>
+   ${r.travelerComparison.map(x=>`<tr><td>${esc(x.field)}</td><td class="mono">${esc(x.poValue)||'—'}</td>
+     <td class="mono">${esc(x.travelerValue)||'—'}${x.correctionText?`<div class="hint">correction on traveler: “${esc(x.correctionText)}” · initials ${x.correctionInitials==='YES'?'✓':'✗'} · date ${x.correctionDate==='YES'?'✓':'✗'}</div>`:''}</td>
+     <td><span class="st st-${x.status==='MATCH'?'M':x.status==='MISMATCH'?'X':'W'}">${x.status}</span>
+      ${x.note?`<div class="hint">${esc(x.note)}</div>`:''}${accChip('scr2::traveler::'+x.field,'')}</td></tr>`).join('')}</table></div>`:''}
+  ${cnCard()}
+  ${saveRow()}
+  <div class="sec"><h3>SCR2 stage gate</h3><span class="rule"></span></div>
+  <p class="note">Internal stage gate — mirrors Access. Reviewer must differ from SCR1 (enforced).</p>
+  ${done?`<div class="banner">✓ SCR2 gate passed — ${esc(S.signoffs.find(s=>s.stage==='SCR2')?.name)} (${esc(S.signoffs.find(s=>s.stage==='SCR2')?.ini)}) · instance downloaded — hand it to the Final Inspection reviewer.</div>
+    <div class="gatebox"><button class="primary" onclick="saveInstance()">Download instance again</button>
+    <button onclick="S.stage='FI';render()">Continue to Final Inspection here →</button></div>`
+  :`<div class="checklist">
+     <label><input type="checkbox" ${S.labelAttest?'checked':''} onchange="attestLabels(this)">
+       Labels GENERATED in Access for this WO (attestation — required; they are verified at Final Inspection)${S.labelAttest?` <span class="hint">— ${esc(S.labelAttest.by)} ${(S.labelAttest.at||'').slice(0,10)}</span>`:''}</label>
+    </div>
+    <div class="gatebox">
+     <button class="primary" ${r&&!blocking.length&&RV.ini&&S.labelAttest?'':'disabled'}
+      title="${!RV.ini?'Set your identity above':!r?'Run the SCR2 audit first':blocking.length?'Open items gate at/before packaging':!S.labelAttest?'Record the label attestation':''}"
+      onclick="gateSCR2()">Sign off SCR2${RV.ini?' as '+esc(RV.ini):''}</button>
+     <span class="hint">${!r?'Audit required before sign-off.':blocking.length?blocking.length+' open item(s) block sign-off — work the correction loop.':!S.labelAttest?'Label attestation required.':'Ready.'}</span></div>`}`
+}
+
+function viewFI(){
+  const r=S.fiReport;const done=S.stage==='CLOSED';
+  const open=S.ledger.filter(i=>{const st=i.state||(i.res?'RESOLVED':'OPEN');return st==='OPEN'||st==='DEFERRED'});
+  const overridden=S.ledger.filter(i=>(i.state||'')==='OVERRIDDEN');
+  const HUMAN=[['coc','COC language matches the PO (report reviewed, corrections confirmed)'],
+    ['pack','Pack slip matches traveler + PO'],['trace','Traceability consistent across all documents'],
+    ['phys','Physical inspection complete (no tool can do this)']];
+  const allChecked=HUMAN.every(h=>S.checklist[h[0]]);
+  const so=st=>S.signoffs.find(s=>s.stage===st);
+  return `${BATCH.items.length&&S?`<div style="margin:14px 0 -6px"><button onclick="backToBatch()">\u2190 Batch queue</button></div>`:''}${stagesBar()}${busyBox()}
+  <h2>Final Inspection <span class="badge b-navy mono">${S.wo?'WO '+esc(S.wo):'PO '+esc(S.po)}</span></h2>
+  <p class="note">${esc(S.customer)} · SCR1: <b>${esc(so('SCR1')?.ini||'?')}</b> · SCR2: <b>${esc(so('SCR2')?.ini||'?')}</b>${(so('SCR1')?.outside||so('SCR2')?.outside)?' <span class="hint">(prior stages signed off outside FSCR — job caught up mid-stream)</span>':''}.
+  You are the third set of eyes. Ledger first — nothing ships with an open, undocumented finding.</p>
+  ${idbar()}
+  <div class="sec"><h3>Ledger — no OPEN or DEFERRED items may remain to close the job</h3><span class="rule"></span></div>
+  ${ledgerSection(!done)}
+  ${overridden.length?`<p class="note" style="color:var(--gold-deep)">⚠ ${overridden.length} item${overridden.length===1?'':'s'} OVERRIDDEN — OPEN: shipment permitted by documented SP0120/G1 approval, verification still outstanding (travels in the final instance for follow-up and reporting).</p>`:''}
+  <div class="sec"><h3>Ship-ready documents</h3><span class="rule"></span></div>
+  <div class="doc-grid">
+    ${docCard('po','Current PO',true,'application/pdf')}
+    ${docCard('coc','COC draft',true,'application/pdf')}
+    ${docCard('packSlip','Pack slip',true,'application/pdf')}
+    ${docCard('labels','Generated labels',true,'.docx,application/pdf')}
+    ${docCard('traveler','Final traveler',false,'application/pdf')}
+  </div>
+  ${S.labelAttest?`<p class="note">Labels attested generated in Access by <b>${esc(S.labelAttest.name||S.labelAttest.by)} (${esc(S.labelAttest.by)})</b> on ${(S.labelAttest.at||'').slice(0,10)} — verifying them is THIS stage's job.</p>`:`<p class="note" style="color:var(--warn)">No SCR2 label attestation on this instance${S.caughtUp?' (caught up mid-stream — labels were generated outside FSCR)':''}.</p>`}
+  ${billingCard('Pricing &amp; billing — carried from SCR1 (price verification closes HERE)')}
+  <div class="sec"><h3>COC + pack slip vs. PO</h3><span class="rule"></span></div>
+  ${!done?`<div class="gatebox">
+    <button class="primary" ${KEY.v&&S.docs.po&&S.docs.coc&&S.docs.packSlip&&S.docs.labels&&!BUSY.on?'':'disabled'}
+      title="${!KEY.v?'Activate the API key on the start screen':(!S.docs.coc||!S.docs.packSlip||!S.docs.labels)?'Upload the COC draft, pack slip, and labels':''}"
+      onclick="runFi()">${r?'Re-run Final Inspection audit':'Run Final Inspection audit'}</button>
+    <span class="hint">${KEY.v?'COC verbatim vs PO · pack slip vs traveler + PO · label verification (made at SCR2, checked here) · traceability. 2–5 minutes.':'API key required — activate on the start screen.'}</span></div>`:''}
+  ${r?`<p class="note" style="background:var(--navysoft);color:var(--ink);padding:10px 12px;border-radius:8px">${esc(r.summary)}</p>
+   ${[['COC draft vs. PO','cocChecks','fi::coc::'],['Pack slip vs. traveler + PO','packSlipChecks','fi::packslip::']].map(([t,k,pfx])=>`
+   <h2 style="font-size:13px">${t}</h2>
+   <div class="twrap"><table><tr><th>Check</th><th>Expected (PO governs)</th><th>Found</th><th>Status + your rating</th></tr>
+   ${r[k].map(x=>`<tr><td>${esc(x.item)}</td><td class="mono">${esc(x.expected)||'—'}</td><td class="mono">${esc(x.found)||'—'}</td>
+     <td><span class="st st-${x.status==='PASS'?'M':x.status==='DISCREPANCY'?'X':'W'}">${x.status}</span>
+     ${x.note?`<div class="hint">${esc(x.note)}</div>`:''}${accChip(pfx+x.item,'')}</td></tr>`).join('')}</table></div>`).join('')}
+   ${r.labels&&r.labels.length?`<h2 style="font-size:13px">Labels — coverage ${(r.labelCoverage||{labeledUnits:[]}).labeledUnits.length}/${(r.labelCoverage||{expectedUnits:[]}).expectedUnits.length}
+    ${(r.labelCoverage&&r.labelCoverage.missing.length)?' · MISSING: '+esc(r.labelCoverage.missing.join(', ')):''}
+    ${(r.labelCoverage&&r.labelCoverage.extra.length)?' · EXTRA: '+esc(r.labelCoverage.extra.join(', ')):''}</h2>
+   ${r.labels.map(L=>`<details><summary>${esc(L.labelRef)} · unit ${esc(L.traceabilityUnit)} · <b>${L.status}</b> —
+      ${L.checks.filter(c=>c.status!=='PASS').map(c=>c.check+': '+c.status).join(', ')||'all checks pass'}</summary>
+     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0">
+      <div><span class="acc-l">Should read</span><pre class="mono" style="font-size:10px;background:var(--surface2);padding:6px 8px;border-radius:6px;white-space:pre-wrap">${esc(L.shouldRead)}</pre></div>
+      <div><span class="acc-l">Actual</span><pre class="mono" style="font-size:10px;background:var(--surface2);padding:6px 8px;border-radius:6px;white-space:pre-wrap">${esc(L.actual)}</pre></div></div>
+     <ul style="margin:4px 0 4px 16px;font-size:11px">${L.checks.map(c=>`<li><b>${c.check}</b>: ${c.status}${c.note?' — '+esc(c.note):''}</li>`).join('')}</ul>
+     ${accChip('fi::label::'+L.labelRef,'label audit accuracy')}</details>`).join('')}`:''}
+   <h2 style="font-size:13px">Traceability across documents</h2>
+   <div class="twrap"><table><tr><th>Field</th><th>PO</th><th>Traveler</th><th>Labels</th><th>COC</th><th>Pack slip</th><th>Consistent + rating</th></tr>
+   ${r.traceability.map(x=>`<tr><td>${esc(x.field)}</td><td class="mono">${esc(x.po)}</td><td class="mono">${esc(x.traveler)}</td>
+     <td class="mono">${esc(x.labels)}</td><td class="mono">${esc(x.coc)}</td><td class="mono">${esc(x.packSlip)}</td>
+     <td><span class="st st-${x.consistent?'M':'X'}">${x.consistent?'YES':'NO'}</span>
+     ${x.note?`<div class="hint">${esc(x.note)}</div>`:''}${accChip('fi::trace::'+x.field,'')}</td></tr>`).join('')}</table></div>`:''}
+  ${cnCard()}
+  ${saveRow()}
+  <div class="sec"><h3>Final Inspection stage gate — closes the job</h3><span class="rule"></span></div>
+  <p class="note">Mirrors the official Access sign-off. Reviewer must differ from BOTH prior techs (enforced).</p>
+  ${done?`<div class="banner">✓ JOB CLOSED — ${esc(so('FI')?.name)} (${esc(so('FI')?.ini)}) · three distinct reviewers:
+     SCR1 ${esc(so('SCR1')?.ini)} → SCR2 ${esc(so('SCR2')?.ini)} → FI ${esc(so('FI')?.ini)} · final instance downloaded (the complete audit trail).</div>
+    <div class="gatebox"><button class="primary" onclick="saveInstance()">Download final instance again</button>
+     <button onclick="exportFeedback()">Export feedback JSON</button>
+     <span class="hint">Send the instance (or the slim feedback file) back to Tyler — this is what tunes the next build.</span></div>`
+  :`<div class="checklist">
+     <label class="${open.length?'auto-no':'auto-ok'}"><input type="checkbox" disabled ${open.length?'':'checked'}>
+       No OPEN or DEFERRED ledger items (${open.length} blocking${overridden.length?'; '+overridden.length+' overridden — open, permitted by documented Access approval':''})</label>
+     ${HUMAN.map(h=>`<label><input type="checkbox" ${S.checklist[h[0]]?'checked':''} onchange="setCheck('${h[0]}',this.checked)"> ${h[1]}</label>`).join('')}
+    </div>
+    <div class="gatebox">
+     <button class="primary" ${r&&!open.length&&allChecked&&RV.ini?'':'disabled'}
+      title="${!RV.ini?'Set your identity above':!r?'Run the Final Inspection audit first':open.length?'Every gate must be clear to close':!allChecked?'Complete the checklist':''}"
+      onclick="gateFI()">Sign off Final Inspection${RV.ini?' as '+esc(RV.ini):''} — close job</button>
+     <span class="hint">${open.length?open.length+' open item(s) block closing.':!r?'Audit required.':!allChecked?'Checklist incomplete.':'Ready to close.'}</span></div>`}`
+}
+
+function updateTopbar(){
+  const el=$('#fb-count');if(!el)return;const n=fbCount();
+  const prev=el.dataset.n||'0';
+  if(!S||n===0){el.style.display='none'}else{el.style.display='';el.textContent='feedback: '+n;
+    if(String(n)!==prev){el.classList.remove('pulse');void el.offsetWidth;el.classList.add('pulse')}}
+  el.dataset.n=String(n);
+  const tb=$('#theme-btn');if(tb)tb.textContent=document.documentElement.getAttribute('data-theme')==='dark'?'\u2600\ufe0f':'\ud83c\udf19';
+}
+function viewBatch(){
+  const n=BATCH.items.length;
+  const c=s=>BATCH.items.filter(i=>i.status===s).length;
+  const gated=BATCH.items.filter(i=>i.job&&i.job.stage!=='SCR1').length;
+  return `${BATCH.items.length&&S?`<div style="margin:14px 0 -6px"><button onclick="backToBatch()">\u2190 Batch queue</button></div>`:''}${stagesBar()}${busyBox()}
+  <h2>SCR1 batch \u2014 ${n} PO${n>1?'s':''}</h2>
+  <p class="note">${BATCH.running?'Extracting 2 at a time \u2014 open finished POs while the rest run.':'Extraction finished.'}
+   ${c('ready')} ready \u00b7 ${c('extracting')} extracting \u00b7 ${c('queued')} queued \u00b7 ${c('failed')} failed \u00b7 ${gated} signed off.
+   Every extracted PO is its own instance file \u2014 open + work it here, or Save and distribute to another reviewer.</p>
+  ${idbar()}
+  <div class="gatebox">
+    <button class="primary" ${BATCH.items.some(i=>i.job)?'':'disabled'} onclick="saveAllBatch()">\u2b07 Download all instances (${BATCH.items.filter(i=>i.job).length})</button>
+    <span class="hint">cumulative batch cost $${BATCH.items.reduce((a,it)=>a+((it.job&&it.job.metrics&&it.job.metrics.totalCost)||0),0).toFixed(2)}</span>
+    <span class="hint">One file per WO \u2014 hand them out for SCR1 review or onward stages.</span>
+    <button onclick="clearBatch()" style="margin-left:auto">Clear batch</button>
+  </div>
+  ${BATCH.items.map((it,ix)=>{
+    const j=it.job;
+    const holds=j?j.ledger.filter(x=>x.cls==='HOLD'&&!x.res).length:0;
+    const alerts=j?j.ledger.filter(x=>x.cls==='ALERT'&&!x.res).length:0;
+    const badge=it.status==='ready'?(j.stage!=='SCR1'?`<span class="badge b-ok">\u2713 ${j.stage==='SCR2'?'SCR1 SIGNED OFF':j.stage}</span>`:(holds?`<span class="badge b-hold">${holds} HOLD</span>`:`<span class="badge b-ok">CLEAR</span>`))
+      :it.status==='extracting'?'<span class="badge b-navy">EXTRACTING\u2026</span>'
+      :it.status==='failed'?'<span class="badge b-hold">FAILED</span>'
+      :'<span class="badge">QUEUED</span>';
+    return `<div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span class="mono" style="font-size:12px;flex:1;min-width:220px">${j?('<b>'+esc(j.po)+'</b> \u00b7 '+esc(j.customer)):esc(it.name)}</span>
+      ${badge}
+      ${j&&it.status==='ready'&&j.stage==='SCR1'?`<span class="hint">${alerts} alert${alerts===1?'':'s'}</span>`:''}
+      ${it.error?`<span class="hint" style="color:var(--bad)">${esc(it.error.slice(0,70))}</span>`:''}
+      ${j?`<button class="primary" onclick="openBatchItem(${ix})">Open</button>
+           <button onclick="saveBatchItem(${ix})">\ud83d\udcbe Save</button>`:''}
+      ${it.status==='failed'?`<button onclick="retryBatchItem(${ix})">Retry</button>`:''}
+    </div>`}).join('')}`
+}
+function render(){
+  updateTopbar();
+  $('#who').textContent=S?`stage: ${S.stage}${S.wo?' · WO '+S.wo:''}${S.po?' · PO '+S.po:''}`:'';
+  const m=$('#main');
+  if(!S){m.innerHTML=BATCH.items.length?viewBatch():viewLanding();return}
+  if(!KEY.v&&(S.stage==='SCR1'&&!S.scr1)){m.innerHTML=viewLanding();return}
+  if(S.stage==='SCR1')m.innerHTML=viewSCR1();
+  else if(S.stage==='SCR2')m.innerHTML=viewSCR2();
+  else m.innerHTML=viewFI();
+  window.scrollTo({top:document.body.scrollHeight>0?window.scrollY:0});
+}
+window.fscrBeta={get state(){return S},set state(v){S=v;render()},get key(){return !!KEY.v},setKey(k){KEY.v=k;render()},RV};
+render();
+</script>
+</body>
+</html>
