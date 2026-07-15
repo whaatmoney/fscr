@@ -34,7 +34,10 @@
   [data-theme="dark"] button.primary{background:var(--gold);border-color:var(--gold);color:#1F2937;font-weight:600}
   [data-theme="dark"] button.primary:hover{background:var(--gold-deep)}
   button:disabled{opacity:.4;cursor:not-allowed}
-  input,textarea,select{font:inherit;font-size:12px;padding:5px 9px;border:1px solid var(--strong);border-radius:var(--r)}
+  input,textarea,select{font:inherit;font-size:12px;padding:5px 9px;border:1px solid var(--strong);border-radius:var(--r);background:var(--surface);color:var(--ink)}
+  ::placeholder{color:var(--faint);opacity:1}
+  :root{color-scheme:light}
+  [data-theme="dark"]{color-scheme:dark}
   input[type="file"]{width:100%;max-width:100%}
   input[type="file"]::file-selector-button{font:inherit;font-size:11px;padding:4px 10px;margin-right:8px;border:1px solid var(--btn-border);background:var(--surface2);color:var(--ink);border-radius:var(--r);cursor:pointer}
   .mono{font-family:var(--mono)}
@@ -739,15 +742,20 @@ window.runFi=async()=>{
   if(!KEY.v){alert('Activate the API key first.');return}
   const D=S.docs;
   if(!D.po){alert('Final Inspection refuses to run without the current PO.');return}
-  if(!D.coc||!D.packSlip||!D.labels){alert('Final Inspection needs the COC draft, the pack slip, and the generated labels (labels are made at SCR2, verified here).');return}
+  if(!D.coc||!D.packSlip||(!D.labels&&!labelsNotRequired())){alert('Final Inspection needs the COC draft, the pack slip, and the generated labels (labels are made at SCR2, verified here). If this WO genuinely requires no labels, record the declaration in the labels card below — reason required.');return}
   try{
     const content=[{type:'text',text:'DOCUMENT 1 — CURRENT PO (PO v1, the comparison authority):'},contentBlockFor(D.po),
       {type:'text',text:'DOCUMENT 2 — COC DRAFT (COC v1, audit subject):'},contentBlockFor(D.coc),
       {type:'text',text:'DOCUMENT 3 — PACK SLIP (PACK_SLIP v1, audit subject):'},contentBlockFor(D.packSlip)];
     if(D.traveler){content.push({type:'text',text:'DOCUMENT 4 — COMPLETED TRAVELER (TRAVELER v1, consistency reference for the pack slip; PO still governs):'},contentBlockFor(D.traveler));}
-    if(D.labels.name.toLowerCase().endsWith('.docx')){
+    if(D.labels){ // evidence beats declaration — uploaded labels are ALWAYS verified
+      if(D.labels.name.toLowerCase().endsWith('.docx')){
         content.push({type:'text',text:'DOCUMENT 5 — GENERATED LABELS (LABELS v1), extracted text (labels appear sequentially, one block per label):\n\n'+await docxToText(D.labels.b64)});
       }else{content.push({type:'text',text:'DOCUMENT 5 — GENERATED LABELS (LABELS v1):'},contentBlockFor(D.labels));}
+    }else{
+      const la=S.labelAttest;
+      content.push({type:'text',text:'DOCUMENT 5 — GENERATED LABELS: NONE PROVIDED. Labels were declared NOT REQUIRED for this WO (declaration recorded at '+(la.declaredAt||'SCR2')+' by '+la.by+' on '+(la.at||'').slice(0,10)+' — reason: '+la.reason+'). Do NOT raise findings about missing labels or label coverage: return labels as an empty array and labelCoverage with all four arrays empty, and leave the labels column of the traceability matrix blank. Run every other check (COC verbatim vs PO, pack slip vs traveler + PO, traceability across the available documents) exactly as normal.'});
+    }
     content.push({type:'text',text:'Audit the COC draft, pack slip, and labels (and traceability across all documents) against the PO. Call emit_final_inspection exactly once.'});
     const raw=await callClaude(DATA.fi.system,DATA.fi.tool,content,'Final Inspection audit');addStageMetrics(S,'FI');
     S.fiReport={cocChecks:raw.cocChecks||[],packSlipChecks:raw.packSlipChecks||[],
@@ -937,7 +945,7 @@ window.gateSCR1=()=>{if(needRv())return;
 window.gateSCR2=()=>{if(needRv())return;
   const clash=distinct(RV.ini,RV.name);
   if(clash){alert('Refused: the SCR2 reviewer must differ from the '+clash+' reviewer. Independence is a hard rule.');return}
-  if(!S.labelAttest){alert('SCR2 sign-off requires the label attestation — labels are GENERATED in Access at SCR2 and verified at Final Inspection.');return}
+  if(!S.labelAttest){alert('SCR2 sign-off requires either the label attestation (labels GENERATED in Access) or a recorded "this WO requires NO labels" declaration with a reason.');return}
   const blk2=openBlocking('SCR2');if(blk2.length){alert('Refused: '+blk2.length+' OPEN/DEFERRED item(s) gate at or before packaging.');return}
   S.signoffs.push({stage:'SCR2',name:RV.name,ini:RV.ini,date:today()});S.stage='FI';
   saveInstance();render()};
@@ -949,8 +957,17 @@ window.gateFI=()=>{if(needRv())return;
   saveInstance();clearDraft();render()};
 window.setCheck=(k,v)=>{S.checklist[k]=v;persistDraft();render()}
 window.attestLabels=cb=>{if(cb.checked){if(needRv()){cb.checked=false;return}
-    S.labelAttest={by:RV.ini,name:RV.name,at:new Date().toISOString()};toast('✓ Label attestation recorded — Final Inspection verifies them')}
-  else{S.labelAttest=null}
+    S.labelAttest={type:'GENERATED',by:RV.ini,name:RV.name,at:new Date().toISOString()};toast('✓ Label attestation recorded — Final Inspection verifies them')}
+  else{if(labelsNotRequired())return;S.labelAttest=null}
+  persistDraft();render()}
+// legacy instances carry labelAttest without a type — that IS the generated attestation
+window.labelsNotRequired=()=>!!(S&&S.labelAttest&&S.labelAttest.type==='NOT_REQUIRED');
+window.declareNoLabels=(cb,where)=>{if(cb.checked){if(needRv()){cb.checked=false;return}
+    const reason=(document.getElementById('nolabel-reason')?.value||'').trim();
+    if(!reason){alert('A reason is required to declare labels not required (e.g. "bulk parts — PO requires no unit labels"). It is recorded with your initials and travels with the job.');cb.checked=false;return}
+    S.labelAttest={type:'NOT_REQUIRED',reason,declaredAt:where,by:RV.ini,name:RV.name,at:new Date().toISOString()};
+    toast('Recorded: labels declared NOT REQUIRED for this WO — travels with the job')}
+  else{if(!labelsNotRequired())return;S.labelAttest=null}
   persistDraft();render()}
 window.exportFeedback=()=>{
   const fb={schema:'qpc.fscr.beta.feedback/v2',exportedAt:new Date().toISOString(),
@@ -1168,14 +1185,17 @@ function viewSCR2(){
     <div class="gatebox"><button class="primary" onclick="saveInstance()">Download instance again</button>
     <button onclick="S.stage='FI';render()">Continue to Final Inspection here →</button></div>`
   :`<div class="checklist">
-     <label><input type="checkbox" ${S.labelAttest?'checked':''} onchange="attestLabels(this)">
-       Labels GENERATED in Access for this WO (attestation — required; they are verified at Final Inspection)${S.labelAttest?` <span class="hint">— ${esc(S.labelAttest.by)} ${(S.labelAttest.at||'').slice(0,10)}</span>`:''}</label>
+     <label><input type="checkbox" ${S.labelAttest&&!labelsNotRequired()?'checked':''} onchange="attestLabels(this)">
+       Labels GENERATED in Access for this WO (attestation — they are verified at Final Inspection)${S.labelAttest&&!labelsNotRequired()?` <span class="hint">— ${esc(S.labelAttest.by)} ${(S.labelAttest.at||'').slice(0,10)}</span>`:''}</label>
+     <label><input type="checkbox" ${labelsNotRequired()?'checked':''} onchange="declareNoLabels(this,'SCR2')">
+       This WO requires NO labels${labelsNotRequired()?` <span class="hint">— ${esc(S.labelAttest.reason)} · ${esc(S.labelAttest.by)} ${(S.labelAttest.at||'').slice(0,10)}</span>`:''}</label>
+     ${!S.labelAttest?`<input id="nolabel-reason" placeholder="reason — required to declare no labels, recorded with your initials" style="max-width:420px">`:''}
     </div>
     <div class="gatebox">
      <button class="primary" ${r&&!blocking.length&&RV.ini&&S.labelAttest?'':'disabled'}
-      title="${!RV.ini?'Set your identity above':!r?'Run the SCR2 audit first':blocking.length?'Open items gate at/before packaging':!S.labelAttest?'Record the label attestation':''}"
+      title="${!RV.ini?'Set your identity above':!r?'Run the SCR2 audit first':blocking.length?'Open items gate at/before packaging':!S.labelAttest?'Record the label attestation — or declare labels not required':''}"
       onclick="gateSCR2()">Sign off SCR2${RV.ini?' as '+esc(RV.ini):''}</button>
-     <span class="hint">${!r?'Audit required before sign-off.':blocking.length?blocking.length+' open item(s) block sign-off — work the correction loop.':!S.labelAttest?'Label attestation required.':'Ready.'}</span></div>`}`
+     <span class="hint">${!r?'Audit required before sign-off.':blocking.length?blocking.length+' open item(s) block sign-off — work the correction loop.':!S.labelAttest?'Label attestation (or a no-labels declaration) required.':'Ready.'}</span></div>`}`
 }
 
 function viewFI(){
@@ -1200,17 +1220,22 @@ function viewFI(){
     ${docCard('po','Current PO',true,'application/pdf')}
     ${docCard('coc','COC draft',true,'application/pdf')}
     ${docCard('packSlip','Pack slip',true,'application/pdf')}
-    ${docCard('labels','Generated labels',true,'.docx,application/pdf')}
+    ${docCard('labels','Generated labels',!labelsNotRequired(),'.docx,application/pdf')}
     ${docCard('traveler','Final traveler',false,'application/pdf')}
   </div>
-  ${S.labelAttest?`<p class="note">Labels attested generated in Access by <b>${esc(S.labelAttest.name||S.labelAttest.by)} (${esc(S.labelAttest.by)})</b> on ${(S.labelAttest.at||'').slice(0,10)} — verifying them is THIS stage's job.</p>`:`<p class="note" style="color:var(--warn)">No SCR2 label attestation on this instance${S.caughtUp?' (caught up mid-stream — labels were generated outside FSCR)':''}.</p>`}
+  ${labelsNotRequired()?`<p class="note" style="color:var(--gold-deep)">Labels declared NOT REQUIRED for this WO at ${esc(S.labelAttest.declaredAt||'SCR2')} by <b>${esc(S.labelAttest.name||S.labelAttest.by)} (${esc(S.labelAttest.by)})</b> on ${(S.labelAttest.at||'').slice(0,10)} — reason: ${esc(S.labelAttest.reason)}. If labels are uploaded anyway they WILL be verified.</p>`
+   :S.labelAttest?`<p class="note">Labels attested generated in Access by <b>${esc(S.labelAttest.name||S.labelAttest.by)} (${esc(S.labelAttest.by)})</b> on ${(S.labelAttest.at||'').slice(0,10)} — verifying them is THIS stage's job.</p>`
+   :`<p class="note" style="color:var(--warn)">No SCR2 label attestation on this instance${S.caughtUp?' (caught up mid-stream — labels were generated outside FSCR)':''}.</p>
+    ${!done?`<div class="checklist"><label><input type="checkbox" onchange="declareNoLabels(this,'FI')">
+      This WO requires NO labels — declare it here (recorded with YOUR initials${S.caughtUp?'; SCR2 was outside FSCR':''})</label>
+     <input id="nolabel-reason" placeholder="reason — required to declare no labels, recorded with your initials" style="max-width:420px"></div>`:''}`}
   ${billingCard('Pricing &amp; billing — carried from SCR1 (price verification closes HERE)')}
   <div class="sec"><h3>COC + pack slip vs. PO</h3><span class="rule"></span></div>
   ${!done?`<div class="gatebox">
-    <button class="primary" ${KEY.v&&S.docs.po&&S.docs.coc&&S.docs.packSlip&&S.docs.labels&&!BUSY.on?'':'disabled'}
-      title="${!KEY.v?'Activate the API key on the start screen':(!S.docs.coc||!S.docs.packSlip||!S.docs.labels)?'Upload the COC draft, pack slip, and labels':''}"
+    <button class="primary" ${KEY.v&&S.docs.po&&S.docs.coc&&S.docs.packSlip&&(S.docs.labels||labelsNotRequired())&&!BUSY.on?'':'disabled'}
+      title="${!KEY.v?'Activate the API key on the start screen':(!S.docs.coc||!S.docs.packSlip||(!S.docs.labels&&!labelsNotRequired()))?'Upload the COC draft, pack slip, and labels (or record the no-labels declaration above)':''}"
       onclick="runFi()">${r?'Re-run Final Inspection audit':'Run Final Inspection audit'}</button>
-    <span class="hint">${KEY.v?'COC verbatim vs PO · pack slip vs traveler + PO · label verification (made at SCR2, checked here) · traceability. 2–5 minutes.':'API key required — activate on the start screen.'}</span></div>`:''}
+    <span class="hint">${KEY.v?'COC verbatim vs PO · pack slip vs traveler + PO · label verification (made at SCR2, checked here'+(labelsNotRequired()?' — declared not required for this WO':'')+') · traceability. 2–5 minutes.':'API key required — activate on the start screen.'}</span></div>`:''}
   ${r?`<p class="note" style="background:var(--navysoft);color:var(--ink);padding:10px 12px;border-radius:8px">${esc(r.summary)}</p>
    ${[['COC draft vs. PO','cocChecks','fi::coc::'],['Pack slip vs. traveler + PO','packSlipChecks','fi::packslip::']].map(([t,k,pfx])=>`
    <h2 style="font-size:13px">${t}</h2>
@@ -1218,6 +1243,7 @@ function viewFI(){
    ${r[k].map(x=>`<tr><td>${esc(x.item)}</td><td class="mono">${esc(x.expected)||'—'}</td><td class="mono">${esc(x.found)||'—'}</td>
      <td><span class="st st-${x.status==='PASS'?'M':x.status==='DISCREPANCY'?'X':'W'}">${x.status}</span>
      ${x.note?`<div class="hint">${esc(x.note)}</div>`:''}${accChip(pfx+x.item,'')}</td></tr>`).join('')}</table></div>`).join('')}
+   ${(!r.labels||!r.labels.length)&&labelsNotRequired()?`<p class="note">Labels — declared NOT REQUIRED for this WO (${esc(S.labelAttest.reason)}); none verified.</p>`:''}
    ${r.labels&&r.labels.length?`<h2 style="font-size:13px">Labels — coverage ${(r.labelCoverage||{labeledUnits:[]}).labeledUnits.length}/${(r.labelCoverage||{expectedUnits:[]}).expectedUnits.length}
     ${(r.labelCoverage&&r.labelCoverage.missing.length)?' · MISSING: '+esc(r.labelCoverage.missing.join(', ')):''}
     ${(r.labelCoverage&&r.labelCoverage.extra.length)?' · EXTRA: '+esc(r.labelCoverage.extra.join(', ')):''}</h2>
