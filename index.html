@@ -6,11 +6,11 @@
 <title>FSCR Beta — Full Service Contract Review</title>
 <style>
   :root{--bg:#f5f3ee;--surface:#fff;--surface2:#faf8f3;--ink:#1F2937;--soft:#4b5563;--faint:#8a8d93;
-  --line:#e7e3d8;--strong:#d3cdbc;--navy:#1F2937;--navysoft:#f4ecd9;--gold:#C9A34D;--gold-deep:#a8843a;
+  --line:#e7e3d8;--strong:#d3cdbc;--btn-border:var(--strong);--navy:#1F2937;--navysoft:#f4ecd9;--gold:#C9A34D;--gold-deep:#a8843a;
   --ok:#15803d;--okbg:#e9f4ed;
   --bad:#b42318;--badbg:#fbeae8;--warn:#92600a;--warnbg:#fbf1d8;--r:8px;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--sans:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;--shadow:0 1px 2px rgba(28,29,31,.04)}
-  [data-theme="dark"]{--bg:#16171b;--surface:#1f2127;--surface2:#282a31;--ink:#eceae4;--soft:#b8b5ac;--faint:#84868c;--line:#2e3037;--strong:#3d4048;--navy:#C9A34D;--navysoft:#2e2818;--gold:#C9A34D;--gold-deep:#dcb968;--ok:#5fbe82;--okbg:#16281d;--bad:#e0685c;--badbg:#33201d;--warn:#d3a04a;--warnbg:#32290f;--shadow:none}
+  [data-theme="dark"]{--bg:#16171b;--surface:#1f2127;--surface2:#282a31;--ink:#eceae4;--soft:#b8b5ac;--faint:#84868c;--line:#2e3037;--strong:#3d4048;--btn-border:#4f525c;--navy:#C9A34D;--navysoft:#2e2818;--gold:#C9A34D;--gold-deep:#dcb968;--ok:#5fbe82;--okbg:#16281d;--bad:#e0685c;--badbg:#33201d;--warn:#d3a04a;--warnbg:#32290f;--shadow:none}
   *{box-sizing:border-box;margin:0}
   body{font:13px/1.5 var(--sans);background:var(--bg);color:var(--ink);padding:0 0 80px}
   .top{position:sticky;top:0;background:var(--surface);border-bottom:1px solid var(--line);padding:10px 20px;
@@ -26,14 +26,17 @@
   .sec h3{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint)}
   .sec .rule{flex:1;height:1px;background:var(--line)}
   .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin-bottom:10px;box-shadow:var(--shadow)}
-  button{font:inherit;font-size:12px;padding:5px 12px;border:1px solid var(--strong);background:var(--surface);border-radius:var(--r);cursor:pointer;transition:background .12s}
-  button:hover{background:var(--surface2)}
+  button{font:inherit;font-size:12px;padding:5px 12px;border:1px solid var(--btn-border);background:var(--surface);color:var(--ink);border-radius:var(--r);cursor:pointer;transition:background .12s,border-color .12s}
+  button:hover{background:var(--surface2);border-color:var(--faint)}
+  button:focus-visible{outline:2px solid var(--gold);outline-offset:1px}
   button.primary{background:#1F2937;border-color:var(--gold);color:#fff}
   button.primary:hover{background:#2b3a4f}
   [data-theme="dark"] button.primary{background:var(--gold);border-color:var(--gold);color:#1F2937;font-weight:600}
   [data-theme="dark"] button.primary:hover{background:var(--gold-deep)}
   button:disabled{opacity:.4;cursor:not-allowed}
   input,textarea,select{font:inherit;font-size:12px;padding:5px 9px;border:1px solid var(--strong);border-radius:var(--r)}
+  input[type="file"]{width:100%;max-width:100%}
+  input[type="file"]::file-selector-button{font:inherit;font-size:11px;padding:4px 10px;margin-right:8px;border:1px solid var(--btn-border);background:var(--surface2);color:var(--ink);border-radius:var(--r);cursor:pointer}
   .mono{font-family:var(--mono)}
   .badge{font-size:10px;font-weight:700;letter-spacing:.04em;padding:2px 8px;border-radius:var(--r)}
   .b-hold{background:var(--badbg);color:var(--bad)}.b-alert{background:var(--warnbg);color:var(--warn)}
