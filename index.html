@@ -402,10 +402,10 @@ window.addEventListener('beforeunload',e=>{if(isDirty()){e.preventDefault();e.re
 function persistDraft(){CHG.seq++;try{localStorage.setItem('fscr.beta.draft',JSON.stringify(S))}catch(e){}}
 function clearDraft(){try{localStorage.removeItem('fscr.beta.draft')}catch(e){}}
 
-function saveInstance(job){
+function saveInstance(job,tag){
   const J=job||S; if(!J)return;
   J.history.push({at:new Date().toISOString(),stage:J.stage,by:RV.ini||''});
-  const nm='fscr_'+(J.wo||J.po||'job').replace(/[^A-Za-z0-9-]/g,'')+'_'+J.stage+'.json';
+  const nm='fscr_'+(J.wo||J.po||'job').replace(/[^A-Za-z0-9-]/g,'')+'_'+J.stage+(tag?'_'+tag:'')+'.json';
   try{const b=new Blob([JSON.stringify(J)],{type:'application/json'});
     const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=nm;a.click();}catch(e){}
   if(J===S)persistDraft();
@@ -446,7 +446,8 @@ function featureMigrate(j){
   }
   if(j.stage!=='CLOSED'){ // evidence-required price closure applies during migration (ruling 2026-07-16)
     for(const i of j.ledger||[]){
-      const isPrice=i.kind==='price'||/PRICE\s+VERIF/i.test(i.label||'');
+      const isPrice=i.kind==='price'||/\bPRICE\b|PRICING|LOT\s*MIN|EXPEDITE\s+FEE/i.test((i.label||'')+' '+(i.why||''));
+      if(isPrice&&!i.kind)i.kind='price'; // r15: price-like findings get the typed-evidence controls
       if(isPrice&&i.res&&(i.state||'RESOLVED')==='RESOLVED'){
         const note=String(i.res.note||''),src=String(i.res.src||'');
         if(!src&&( PRICE_FUTURE.test(note)||i.res.outcome==='LEGACY'||!note )){
@@ -705,7 +706,7 @@ function buildJobFromRaw(raw,fname,b64){
   job.customer=((raw.wo||{}).customer||{}).value||'(no customer)';
   job.ledger=(raw.issues||[])
     .filter(i=>!/PRICE\s+VERIF/i.test(i.label||''))  // deterministic price item below supersedes model-raised ones
-    .map((i,ix)=>({id:'s1-'+(ix+1),label:i.label||'',cls:i.class==='HOLD'?'HOLD':'ALERT',
+    .map((i,ix)=>({id:'s1-'+(ix+1),kind:(/\bPRICE\b|PRICING|LOT\s*MIN|EXPEDITE\s+FEE/i.test((i.label||'')+' '+(i.why||''))?'price':undefined),label:i.label||'',cls:i.class==='HOLD'?'HOLD':'ALERT',
       gate:GATE_ORDER.includes(i.gate)?i.gate:'SCR',tier:i.tier||3,act:i.action||'',why:i.why||'',
       fieldRefs:Array.isArray(i.fieldRefs)?i.fieldRefs:[],from:'SCR1',state:'OPEN',res:null,audit:[]}));
   // B1 (ruling 07-14): deterministic price-verification item on EVERY job.
@@ -784,7 +785,8 @@ window.saveField=(k,btn)=>{const ta=btn.parentElement.querySelector('textarea');
   const f=S.scr1.fields.find(x=>x.k===k);if(!f)return;
   if(nv===f.v){delete EDITING[k];render();return}
   if(f.entry){ // DB-entry field: record provenance, never the parser-edit machinery
-    f.v=nv;f.enteredBy=RV.ini;f.enteredAt=today();f.entrySrc='ACCESS';
+    f.v=nv;f.enteredBy=RV.ini;f.enteredAt=today();
+    f.entrySrc=(f.k==='receivedDate'&&S.advancePo)?'ADVANCE-PAPERWORK':'ACCESS';
     delete EDITING[k];persistDraft();render();
     toast('Recorded from Access ('+RV.ini+')');return}
   if(f.orig===undefined)f.orig=f.v;
@@ -819,7 +821,7 @@ window.runScr2=async()=>{
       if(findExisting(d.label||'',d.field||'',d.poValue||'',d.foundValue||''))return; // already tracked (open/resolved)
       const fpKey=norm(d.label||'')+'|'+norm(d.field||'')+'|'+norm(d.poValue||'')+'|'+norm(d.foundValue||'');
       if(seenNew.has(fpKey))return;seenNew.add(fpKey);
-      S.ledger.push({id:nextLedgerId('s2-'),label:d.label||'',field:d.field||'',cls:d.class==='HOLD'?'HOLD':'ALERT',
+      S.ledger.push({id:nextLedgerId('s2-'),kind:(/\bPRICE\b|PRICING|LOT\s*MIN|EXPEDITE\s+FEE/i.test((d.label||'')+' '+(d.why||''))?'price':undefined),label:d.label||'',field:d.field||'',cls:d.class==='HOLD'?'HOLD':'ALERT',
         gate:GATE_ORDER.includes(d.gate)?d.gate:'PACKAGING',tier:d.tier||3,act:d.action||'',why:d.why||'',
         from:'SCR2',poValue:d.poValue||'',foundValue:d.foundValue||'',corrected:d.correctedValue||'',
         ise:d.internalSourceEligible===true,state:'OPEN',res:null,audit:[]});});
@@ -862,7 +864,7 @@ window.runFi=async()=>{
       if(findExisting(d.label||'',d.field||'',d.poValue||'',d.foundValue||''))return; // already tracked (open/resolved)
       const fpKey=norm(d.label||'')+'|'+norm(d.field||'')+'|'+norm(d.poValue||'')+'|'+norm(d.foundValue||'');
       if(seenNew.has(fpKey))return;seenNew.add(fpKey);
-      S.ledger.push({id:nextLedgerId('fi-'),label:d.label||'',field:d.field||'',cls:d.class==='HOLD'?'HOLD':'ALERT',
+      S.ledger.push({id:nextLedgerId('fi-'),kind:(/\bPRICE\b|PRICING|LOT\s*MIN|EXPEDITE\s+FEE/i.test((d.label||'')+' '+(d.why||''))?'price':undefined),label:d.label||'',field:d.field||'',cls:d.class==='HOLD'?'HOLD':'ALERT',
         gate:GATE_ORDER.includes(d.gate)?d.gate:'FINAL INSPECTION',tier:d.tier||3,act:d.action||'',why:d.why||'',
         from:'FI',poValue:d.poValue||'',foundValue:d.foundValue||'',corrected:d.correctedValue||'',state:'OPEN',res:null,audit:[]});});
     persistDraft();render();
@@ -902,6 +904,119 @@ function fpLabel(l){const n=norm(l);
   if(!qualified&&/REQUIR/.test(n)
     &&(/(COFC|CERTIFICATEOFCONFORMANCE|CONFORMANCE)/.test(n)||/^CERT(IFICATION)?S?REQUIRED/.test(n)))return 'CERTREQUIREDFAMILY';
   return n}
+// r15 SEMANTIC ISSUE FAMILIES (Tyler ruling 2026-07-18): one requirement is
+// dispositioned ONCE — across stages and wordings. A family match requires
+// BOTH the family and a non-empty spec/field anchor to agree; anchor-less
+// items never family-merge (part-rev vs spec-rev stay distinct).
+// consolidation (43652 case): report rows restating a revision fact already
+// dispositioned in the ledger take NO separate rating — one fact, one rating.
+function revCoveredFacts(){const out=[];
+  for(const i of (S&&S.ledger)||[]){const fk=issueFamily(i);
+    if(fk&&fk.fam==='REVISION_PROVENANCE'&&fk.facet){const st=i.state||(i.res?'RESOLVED':'OPEN');
+      if(st!=='OPEN')out.push(fk);}}
+  return out}
+function rowRevTokens(txt){const revs=new Set();let mm;
+  const re=/\bREV(?:ISION)?\.?\s*:?\s*([A-Z0-9]{1,4})\b|\bVER\.?\s*(\d{1,4})\b/g;
+  const T=String(txt||'').toUpperCase();
+  while((mm=re.exec(T))){const r=(mm[1]||mm[2]);if(r&&!/^(NO|NOT|IS|ON|PER|THE|AND)$/.test(r))revs.add(norm(r));}
+  return revs}
+// r16 correction 2: suppress ONLY a genuine restatement of the dispositioned
+// fact — same spec anchor AND the row's revision tokens all inside the
+// dispositioned facet. A changed revision (REV F/E after REV E/D) keeps its
+// rating. Rows with the anchor but no revision token keep their rating too.
+// r17: row suppression requires SUBJECT identity via the semantic mapping —
+// same spec + same revision fact + same requirement subject. Unavailable
+// subject identity keeps the rating visible (safe failure = duplicate rating).
+function rowCovered(subject,txt){const n=norm(String(txt||''));if(!n)return false;
+  const sc=subjClass(subject);if(!sc)return false;
+  const toks=rowRevTokens(txt);if(!toks.size)return false;
+  for(const fk of revCoveredFacts()){
+    const fc=subjClass(fk.f);if(!fc||fc!==sc)continue;
+    if(fk.anchor.length>=5&&n.indexOf(fk.anchor)>=0){
+      const fs=new Set(fk.facet.split('+'));
+      let all=true;for(const t of toks){if(!fs.has(t)){all=false;break}}
+      if(all)return true}}
+  return false}
+const COVERED_HINT='<span class="hint">covered by ledger disposition — no separate rating</span>';
+function issueFamily(i){
+  const L=(String(i.label||'')+' '+String(i.why||'')).toUpperCase();
+  let fam=null;
+  if(/\bPRICE\b|PRICING|LOT\s*MIN|EXPEDITE\s+FEE/.test(L))fam='PRICE_VERIFICATION';
+  else if(/\bOR\b[^A-Z]|ALTERNATIVE|MUST\s+SELECT|CUSTOMER.{0,14}(CHOICE|SELECT)/.test(L))fam='CUSTOMER_OR_CHOICE';
+  else if(/REVISION|DESIGNATOR|SUPERSE|LATEST\s+REV|\bREV\.?\b|\bVER\.?\s*\d/.test(L))fam='REVISION_PROVENANCE';
+  else if(/CERT|C\s*OF\s*C|CONFORMANCE/.test(L))fam='CERT_REQUIREMENT';
+  if(!fam)return null;
+  const hay=(String(i.label||'')+' '+String(i.poStates||'')+' '+String(i.poValue||'')+' '+String(i.foundValue||'')).toUpperCase();
+  const m=hay.match(/\b[A-Z]{2,6}(?:-STD)?-?[A-Z]?\d{2,}[A-Z0-9.\/-]*\b/);
+  const anchor=m?norm(m[0]):'';
+  if(!anchor)return null;
+  // REQUIREMENT FACET (r16 correction 1): family+spec is only a CANDIDATE —
+  // the facet identifies WHICH requirement under that spec.
+  const T=hay+' '+String(i.why||'').toUpperCase();
+  let facet='';
+  if(fam==='CERT_REQUIREMENT'){
+    const fm=T.match(/NADCAP|TEST\s*DATA|RAW\s*MATERIAL|MATERIAL\s+CERT|\bMTRS?\b|DICTATED|LANGUAGE|DISTRIBUT|EMAIL|ORIGIN|CALIBRAT|ROHS|MILL\s*TEST/);
+    facet=fm?norm(fm[0]):'GENERIC';
+  }else if(fam==='CUSTOMER_OR_CHOICE'){
+    // r17: parse EXPLICIT option patterns only — "TYPE 6 OR 7", "TYPE 6 OR
+    // TYPE 7", "METHOD 1 OR 2", "NITRIC OR CITRIC". Metadata words are never
+    // options; a facet includes BOTH normalized options or nothing.
+    const toks=new Set();let mm;
+    const re1=/\b(TYPE|METHOD|CLASS|LEVEL|GRADE)\s*([A-Z0-9]{1,4})\s+OR\s+(?:\1\s*)?([A-Z0-9]{1,4})\b/g;
+    while((mm=re1.exec(T))){toks.add(norm(mm[1]+mm[2]));toks.add(norm(mm[1]+mm[3]));}
+    const META=/^(CUSTOMER|CHOICE|CHOICES|SELECT|SELECTED|SELECTION|ALTERNATIVE|ALTERNATE|OPTION|OPTIONS|MUST|THE|AND|PER)$/;
+    const re2=/\b([A-Z]{3,})\s+OR\s+([A-Z]{3,})\b/g;
+    while((mm=re2.exec(T))){if(!META.test(mm[1])&&!META.test(mm[2])){toks.add(norm(mm[1]));toks.add(norm(mm[2]));}}
+    facet=toks.size?[...toks].sort().join('+'):'';
+  }else if(fam==='REVISION_PROVENANCE'){
+    const revs=new Set();let mm;
+    const re=/\bREV(?:ISION)?\.?\s*:?\s*([A-Z0-9]{1,4})\b|\bVER\.?\s*(\d{1,4})\b/g;
+    while((mm=re.exec(T))){const r=(mm[1]||mm[2]);if(r&&!/^(NO|NOT|IS|ON|PER|THE|AND)$/.test(r))revs.add(norm(r));}
+    facet=revs.size?[...revs].sort().join('+'):'';
+  }
+  return {k:fam+'|'+anchor,fam,anchor,facet,
+    f:norm(i.field||''),po:norm(i.poValue||''),fo:norm(i.foundValue||'')};
+}
+// Evidence-aware family match (r16): same family+spec is necessary, never
+// sufficient. Both facets present -> must be equal (generic CofC never merges
+// with NADCAP; Type6/7 never merges with nitric/citric; REV E/D never merges
+// with REV F/E). One side unfaceted: subsumable ONLY if that side also has no
+// structured evidence (an SCR1-level generic flag being specialized). When
+// both carry structured evidence, every present field/PO/found pair must agree.
+// semantic subject classes (r17): an explicit mapping may prove two field
+// names are the same requirement subject; anything unmapped stays distinct.
+function subjClass(s){const n=norm(s||'');if(!n)return '';
+  if(/LABEL/.test(n))return 'LABEL';
+  if(/PACKAG/.test(n))return 'PACKAGING_SPEC';
+  if(/PARTREV|PARTNUMBER|PARTIDENT/.test(n))return 'PART';
+  if(/PROCESS|SPEC|CALLOUT|CLEAN/.test(n))return 'PROCESS_SPEC';
+  return ''}
+function subjCompat(f1,f2){if(!f1||!f2)return true; if(f1===f2)return true;
+  const c1=subjClass(f1),c2=subjClass(f2);return !!c1&&c1===c2}
+function evCompat(x,y){return !x||!y||x===y||x.indexOf(y)>=0||y.indexOf(x)>=0}
+// r17 famMatch: family+spec candidate → facet equality NECESSARY (never
+// sufficient) → structured evidence must still agree. Different non-empty
+// subjects stay distinct unless the semantic mapping proves them the same.
+function famMatch(a,b){
+  if(!a||!b||a.k!==b.k)return false;
+  let bothFaceted=false;
+  if(a.facet&&b.facet){if(a.facet!==b.facet)return false;bothFaceted=true;}
+  else{
+    const aE=!!(a.f||a.po||a.fo),bE=!!(b.f||b.po||b.fo);
+    if(a.facet||b.facet){ // one side unfaceted: subsumable only when that side is evidence-less
+      const ufE=a.facet?bE:aE;
+      if(!ufE)return true;
+    }else{
+      if(!aE||!bE)return true; // both unfaceted, one generic flag
+    }
+  }
+  if(!subjCompat(a.f,b.f))return false;
+  if(!bothFaceted){ // facet already encodes the discriminating content when both present
+    if(!evCompat(a.po,b.po))return false;
+    if(!evCompat(a.fo,b.fo))return false;
+  }
+  return true;
+}
 function fingerprintMatch(i,key,f,po,fo){
   const iF=norm(i.field||''),iPo=norm(i.poValue||''),iFo=norm(i.foundValue||'');
   if(f&&iF===f&&iPo===po&&iFo===fo&&(po||fo))return true;
@@ -910,9 +1025,12 @@ function fingerprintMatch(i,key,f,po,fo){
   return false;}
 function findDisposition(label,field,poValue,foundValue){
   const key=fpLabel(label),f=norm(field||''),po=norm(poValue||''),fo=norm(foundValue||'');
+  const fam=issueFamily({label,field,poValue,foundValue});
   return S.ledger.find(i=>{const st=i.state||(i.res?'RESOLVED':'OPEN');
     const disposed=DISPOSED_STATES.includes(st)||(st==='RESOLVED'&&i.res&&i.res.outcome==='INTERNAL CONTROLLED SOURCE');
-    return disposed&&fingerprintMatch(i,key,f,po,fo);});}
+    if(!disposed)return false;
+    if(fingerprintMatch(i,key,f,po,fo))return true;
+    return famMatch(fam,issueFamily(i));});}
 // Re-run dedupe against NON-DISPOSED items only (OPEN / plain RESOLVED) — the
 // old label-only Set silently swallowed genuinely new same-label findings.
 // Disposed items are exclusively findDisposition's territory under the strict
@@ -923,11 +1041,13 @@ function findDisposition(label,field,poValue,foundValue){
 // nothing, because the item is still on the ledger gating the job.
 function findExisting(label,field,poValue,foundValue){
   const key=fpLabel(label),f=norm(field||''),po=norm(poValue||''),fo=norm(foundValue||'');
+  const fam=issueFamily({label,field,poValue,foundValue});
   return S.ledger.find(i=>{const st=i.state||(i.res?'RESOLVED':'OPEN');
     const disposed=DISPOSED_STATES.includes(st)||(st==='RESOLVED'&&i.res&&i.res.outcome==='INTERNAL CONTROLLED SOURCE');
     if(disposed)return false;
     if(fpLabel(i.label)===key&&norm(i.field||'')===f&&norm(i.poValue||'')===po&&norm(i.foundValue||'')===fo)return true;
-    return fingerprintMatch(i,key,f,po,fo);});}
+    if(fingerprintMatch(i,key,f,po,fo))return true;
+    return famMatch(fam,issueFamily(i));});}
 const L_OUTCOMES=['CORRECTED','VERIFIED — COMPLIES','NOT APPLICABLE — DOCUMENTED'];
 function lit(id){return S.ledger.find(x=>x.id===id)}
 function lAudit(it,what,by,detail){(it.audit=it.audit||[]).push({at:new Date().toISOString(),what,by,detail:detail||''})}
@@ -1089,6 +1209,7 @@ window.gateSCR2=()=>{if(needRv())return;
   S.signoffs.push({stage:'SCR2',name:RV.name,ini:RV.ini,date:today()});S.stage='FI';
   saveInstance();render()};
 window.gateFI=()=>{if(needRv())return;
+  if(S.advancePo){alert('Refused: this job is marked ADVANCE PO — parts not physically received. Confirm physical receipt (and run SCR2 on any revised PO), turn the Advance-PO mode off, and re-enter the Received Date from Access before closing.');return}
   if(S.woInvalid){alert('Refused: this instance carries an invalid WO number ("'+String(S.wo).slice(0,40)+'…"). Correct it from Access (banner above) before closing.');return}
   if(!S.qtyCheck){alert('Refused: record the quantity verification (expected vs actual physical count) before closing — ruling 2026-07-16.');return}
   const clash=distinct(RV.ini,RV.name);
@@ -1096,6 +1217,20 @@ window.gateFI=()=>{if(needRv())return;
   const blkF=openBlocking('FI');if(blkF.length){alert('Refused: '+blkF.length+' OPEN/DEFERRED ledger item(s) block closing — resolve them, or (price verification only) record a documented SP0120/G1 SHIP override.');return}
   S.signoffs.push({stage:'FI',name:RV.name,ini:RV.ini,date:today()});S.stage='CLOSED';
   saveInstance();clearDraft();render()};
+// r15 session continuity (top floor friction): move to the next job without
+// refresh / re-key / re-identity. Key stays in tab memory, never exported.
+window.toggleAdvancePo=cb=>{if(cb.checked){if(needRv()){cb.checked=false;return}
+    S.advancePo={by:RV.ini,at:new Date().toISOString()};
+    const rd=(S.scr1&&S.scr1.fields||[]).find(x=>x.k==='receivedDate');
+    if(rd&&rd.entrySrc==='ACCESS')rd.entrySrc='ADVANCE-PAPERWORK';
+    toast('ADVANCE PO — Received Date now records the PAPERWORK-received date; verify physical receipt (and any PO revision → SCR2) before closing');}
+  else{S.advancePo=undefined;const rd=(S.scr1&&S.scr1.fields||[]).find(x=>x.k==='receivedDate');
+    if(rd&&rd.entrySrc==='ADVANCE-PAPERWORK'){ // r16: a paperwork date must NEVER masquerade as an Access receipt date
+      rd.v='';delete rd.enteredBy;delete rd.enteredAt;delete rd.entrySrc;
+      toast('Advance-PO mode off — Received Date cleared; re-enter it from Access after physical receipt');}}
+  persistDraft();render()};
+window.nextJob=()=>{S=null;clearDraft();CHG.seq=0;CHG.saved=0;CHG.baseline=false;render();
+  toast('Ready for the next job — API key and identity kept for this tab')};
 window.setCheck=(k,v)=>{S.checklist[k]=v;persistDraft();render()}
 window.recordQtyCheck=()=>{if(needRv())return;
   const exp=($('#qty-exp').value||'').trim(),act=($('#qty-act').value||'').trim(),why=($('#qty-why').value||'').trim();
@@ -1144,6 +1279,7 @@ window.exportFeedback=()=>{
 // ---- views -----------------------------------------------------------------------
 function stagesBar(){const map={SCR1:0,SCR2:1,FI:2,CLOSED:3};const cur=map[S?S.stage:'SCR1'];
   let warn='';
+  if(S&&S.advancePo){warn+=`<p class="note" style="color:var(--gold-deep)"><b>ADVANCE PO</b> — Received Date is the PAPERWORK-received date (recorded by ${esc(S.advancePo.by)}); parts not physically received yet. Verify physical receipt — and run SCR2 on the revised PO if one arrives — before closing.</p>`;}
   if(S&&S.woInvalid){warn+=`<div class="card" style="border-color:var(--bad);margin-top:8px"><b style="color:var(--bad)">⚠ INVALID WO NUMBER ON THIS INSTANCE</b> — “${esc(String(S.wo).slice(0,40))}${String(S.wo).length>40?'…':''}” (${esc(S.woInvalid)}) Gates are blocked until corrected from Access.
     <div style="display:flex;gap:6px;margin-top:6px"><input id="fix-wo" placeholder="WO number (from Access)" style="width:160px"><button class="primary" onclick="fixWo()">Correct WO</button></div></div>`}
   if(S&&S.woFileMismatch){warn+=`<div class="card" style="border-color:var(--warn);margin-top:8px"><b style="color:var(--warn)">⚠ JOB IDENTITY MISMATCH acknowledged at load</b> — file said WO ${esc(S.woFileMismatch.file)}, instance says WO ${esc(S.woFileMismatch.instance)}. Confirm the embedded PO really belongs to this job before trusting any audit.</div>`}
@@ -1178,14 +1314,23 @@ function billingCard(label){const b=S.scr1&&S.scr1.billing;
   return `<div class="card"><b style="font-size:12px">${label}</b> · parts total ${b.partsTotal===null?'unreadable — manual lot-min check':'$'+b.partsTotal.toFixed(2)}
    · ${b.lotMin?'<span class="badge b-alert">LOT MIN 7330 NEEDED</span>':'lot minimum not required'}
    · ${b.expedite?'<span class="badge b-navy">EXPEDITE</span>':'no expedite'}</div>`}
+// r15 persistence ruling: a note that only lives in the browser draft is a LOST
+// note — the 07-17 dump carried ZERO of the notes the techs described entering.
+// Post-download submissions immediately re-export the instance.
+function noteSaved(kind){
+  if(CHG.baseline){const stamp='UPDATED_'+new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+    const nm=saveInstance(undefined,stamp);
+    toast('✓ '+kind+' QUEUED — updated instance downloaded ('+nm+'). Hand off THIS file or the '+kind.toLowerCase()+' never leaves your browser.');}
+  else toast('✓ '+kind+' QUEUED — saves with the instance at sign-off');}
 window.addCNote=btn=>{if(needRv())return;const inp=btn.parentElement.querySelector('input');const t=inp.value.trim();
   if(!t){alert('Write the note first.');return}
-  (S.customerNotes=S.customerNotes||[]).push({note:t,customer:S.customer,by:RV.ini,date:today(),stage:S.stage});
-  inp.value='';persistDraft();render();toast('✓ Customer note proposed — queued for controlled review and Access verification (does not affect this job)')};
+  (S.customerNotes=S.customerNotes||[]).push({note:t,customer:S.customer,by:RV.ini,date:today(),stage:S.stage,status:'QUEUED'});
+  inp.value='';persistDraft();render();noteSaved('Customer note')};
 function cnCard(){const list=S.customerNotes||[];
   return `<div class="card"><b style="font-size:12px">Propose a customer note</b>
     <span class="hint">— tribal knowledge: what is NORMAL for ${esc(S.customer)}. Proposals are QUEUED for controlled review + Access verification only — they do not change this job, the model prompts, any field, or any finding.</span>
-    ${list.map(n=>`<div class="hint" style="margin-top:4px">📌 ${esc(n.note)} — ${esc(n.by)} ${n.date} (${esc(n.stage)})</div>`).join('')}
+    ${list.map(n=>`<div class="hint" style="margin-top:4px">📌 ${esc(n.note)} — ${esc(n.by)} ${n.date} (${esc(n.stage)}) <span class="badge b-alert">${esc(n.status||'QUEUED')} — PENDING VERIFICATION — NOT ACTIVE</span></div>`).join('')}
+    ${list.length?`<div class="hint" style="margin-top:2px">Status path: QUEUED → ACCESS VERIFIED → ACTIVE IN PROFILE (or REJECTED). Until ACTIVE, a note never changes any job, prompt, field, or finding.</div>`:''}
     ${S.stage!=='CLOSED'?`<div class="rform" style="margin-top:6px"><input placeholder="e.g. this customer never sends prints — don't flag it">
     <button onclick="addCNote(this)">Propose note</button></div>`:''}
     ${(S.missingAdvisories||[]).filter(m=>m.stage===S.stage).map(m=>`<div class="hint" style="margin-top:4px">⚠ missing advisory: ${esc(m.note)} — ${esc(m.by)} ${m.date}</div>`).join('')}
@@ -1193,8 +1338,8 @@ function cnCard(){const list=S.customerNotes||[];
     <button onclick="addMissing(this)">Report missing</button></div>`:''}</div>`}
 window.addMissing=btn=>{if(needRv())return;const inp=btn.parentElement.querySelector('input');const t=inp.value.trim();
   if(!t){alert('Describe what should have been flagged.');return}
-  (S.missingAdvisories=S.missingAdvisories||[]).push({note:t,stage:S.stage,by:RV.ini,date:today()});
-  inp.value='';persistDraft();render();toast('\u2713 Missing advisory recorded — feeds the next tuning pass')};
+  (S.missingAdvisories=S.missingAdvisories||[]).push({note:t,stage:S.stage,by:RV.ini,date:today(),status:'QUEUED'});
+  inp.value='';persistDraft();render();noteSaved('Missing advisory')};
 
 function viewLanding(){
   let draft=null;try{draft=localStorage.getItem('fscr.beta.draft')}catch(e){}
@@ -1302,9 +1447,12 @@ function viewSCR1(){
   ${cnCard()}
   ${saveRow()}
   <div class="sec"><h3>SCR1 stage gate</h3><span class="rule"></span></div>
+  ${!done?`<div class="checklist"><label><input type="checkbox" ${S.advancePo?'checked':''} onchange="toggleAdvancePo(this)">
+    ADVANCE PO — parts not physically received yet (Received Date = date the PAPERWORK was received; recorded${S.advancePo?' by '+esc(S.advancePo.by):''})</label></div>`:''}
   <p class="note">Internal stage gate — the official sign-off lives in the Access DB; this mirrors it, never replaces it.</p>
   ${done?`<div class="banner">✓ SCR1 gate passed — ${esc(S.signoffs.find(s=>s.stage==='SCR1')?.name)} (${esc(S.signoffs.find(s=>s.stage==='SCR1')?.ini)}) · WO ${esc(S.wo)} · instance downloaded — hand it to the SCR2 reviewer.</div>
     <div class="gatebox"><button class="primary" onclick="saveInstance()">Download instance again</button>
+    <button onclick="nextJob()">Next job → (keeps key + identity)</button>
     <button onclick="render()" style="display:none"></button>
     <button class="primary" onclick="render()" style="display:none"></button>
     <button onclick="S.stage='SCR2';render()">Continue to SCR2 here →</button></div>`
@@ -1353,14 +1501,15 @@ function viewSCR2(){
    ${r.travelerComparison.map(x=>`<tr><td>${esc(x.field)}</td><td class="mono">${esc(x.poValue)||'—'}</td>
      <td class="mono">${esc(x.travelerValue)||'—'}${x.correctionText?`<div class="hint">correction on traveler: “${esc(x.correctionText)}” · initials ${x.correctionInitials==='YES'?'✓':'✗'} · date ${x.correctionDate==='YES'?'✓':'✗'}</div>`:''}</td>
      <td><span class="st st-${x.status==='MATCH'?'M':x.status==='MISMATCH'?'X':'W'}">${x.status}</span>
-      ${x.note?`<div class="hint">${esc(x.note)}</div>`:''}${accChip('scr2::traveler::'+x.field,'')}</td></tr>`).join('')}</table></div>`:''}
+      ${x.note?`<div class="hint">${esc(x.note)}</div>`:''}${rowCovered(x.field,x.field+' '+x.poValue+' '+x.travelerValue)?COVERED_HINT:accChip('scr2::traveler::'+x.field,'')}</td></tr>`).join('')}</table></div>`:''}
   ${cnCard()}
   ${saveRow()}
   <div class="sec"><h3>SCR2 stage gate</h3><span class="rule"></span></div>
   <p class="note">Internal stage gate — mirrors Access. Reviewer must differ from SCR1 (enforced).</p>
   ${done?`<div class="banner">✓ SCR2 gate passed — ${esc(S.signoffs.find(s=>s.stage==='SCR2')?.name)} (${esc(S.signoffs.find(s=>s.stage==='SCR2')?.ini)}) · instance downloaded — hand it to the Final Inspection reviewer.</div>
     <div class="gatebox"><button class="primary" onclick="saveInstance()">Download instance again</button>
-    <button onclick="S.stage='FI';render()">Continue to Final Inspection here →</button></div>`
+    <button onclick="S.stage='FI';render()">Continue to Final Inspection here →</button>
+    <button onclick="nextJob()">Next job → (keeps key + identity)</button></div>`
   :`<div class="checklist">
      <label><input type="checkbox" ${S.labelAttest&&!labelsNotRequired()?'checked':''} onchange="attestLabels(this)">
        Labels GENERATED in Access for this WO (attestation — they are verified at Final Inspection)${S.labelAttest&&!labelsNotRequired()?` <span class="hint">— ${esc(S.labelAttest.by)} ${(S.labelAttest.at||'').slice(0,10)}</span>`:''}</label>
@@ -1428,7 +1577,7 @@ function viewFI(){
    <div class="twrap"><table><tr><th>Check</th><th>Expected (PO governs)</th><th>Found</th><th>Status + your rating</th></tr>
    ${r[k].map(x=>`<tr><td>${esc(x.item)}</td><td class="mono">${esc(x.expected)||'—'}</td><td class="mono">${esc(x.found)||'—'}</td>
      <td><span class="st st-${x.status==='PASS'?'M':x.status==='DISCREPANCY'?'X':'W'}">${x.status}</span>
-     ${x.note?`<div class="hint">${esc(x.note)}</div>`:''}${accChip(pfx+x.item,'')}</td></tr>`).join('')}</table></div>`).join('')}
+     ${x.note?`<div class="hint">${esc(x.note)}</div>`:''}${rowCovered(x.item,x.item+' '+x.expected+' '+x.found)?COVERED_HINT:accChip(pfx+x.item,'')}</td></tr>`).join('')}</table></div>`).join('')}
    ${(!r.labels||!r.labels.length)&&labelsNotRequired()?`<p class="note">Labels — declared NOT REQUIRED for this WO (${esc(S.labelAttest.reason)}); none verified.</p>`:''}
    ${r.labels&&r.labels.length?`<h2 style="font-size:13px">Labels — coverage ${(r.labelCoverage||{labeledUnits:[]}).labeledUnits.length}/${(r.labelCoverage||{expectedUnits:[]}).expectedUnits.length}
     ${(r.labelCoverage&&r.labelCoverage.missing.length)?' · MISSING: '+esc(r.labelCoverage.missing.join(', ')):''}
@@ -1439,13 +1588,13 @@ function viewFI(){
       <div><span class="acc-l">Should read</span><pre class="mono" style="font-size:10px;background:var(--surface2);padding:6px 8px;border-radius:6px;white-space:pre-wrap">${esc(L.shouldRead)}</pre></div>
       <div><span class="acc-l">Actual</span><pre class="mono" style="font-size:10px;background:var(--surface2);padding:6px 8px;border-radius:6px;white-space:pre-wrap">${esc(L.actual)}</pre></div></div>
      <ul style="margin:4px 0 4px 16px;font-size:11px">${L.checks.map(c=>`<li><b>${c.check}</b>: ${c.status}${c.note?' — '+esc(c.note):''}</li>`).join('')}</ul>
-     ${accChip('fi::label::'+L.labelRef,'label audit accuracy')}</details>`).join('')}`:''}
+     ${rowCovered('LABEL',L.shouldRead+' '+L.actual)?COVERED_HINT:accChip('fi::label::'+L.labelRef,'label audit accuracy')}</details>`).join('')}`:''}
    <h2 style="font-size:13px">Traceability across documents</h2>
    <div class="twrap"><table><tr><th>Field</th><th>PO</th><th>Traveler</th><th>Labels</th><th>COC</th><th>Pack slip</th><th>Consistent + rating</th></tr>
    ${r.traceability.map(x=>`<tr><td>${esc(x.field)}</td><td class="mono">${esc(x.po)}</td><td class="mono">${esc(x.traveler)}</td>
      <td class="mono">${esc(x.labels)}</td><td class="mono">${esc(x.coc)}</td><td class="mono">${esc(x.packSlip)}</td>
      <td><span class="st st-${x.consistent?'M':'X'}">${x.consistent?'YES':'NO'}</span>
-     ${x.note?`<div class="hint">${esc(x.note)}</div>`:''}${accChip('fi::trace::'+x.field,'')}</td></tr>`).join('')}</table></div>`:''}
+     ${x.note?`<div class="hint">${esc(x.note)}</div>`:''}${rowCovered(x.field,x.field+' '+x.po+' '+x.traveler+' '+x.labels+' '+x.coc+' '+x.packSlip)?COVERED_HINT:accChip('fi::trace::'+x.field,'')}</td></tr>`).join('')}</table></div>`:''}
   ${cnCard()}
   ${saveRow()}
   <div class="sec"><h3>Final Inspection stage gate — closes the job</h3><span class="rule"></span></div>
@@ -1454,6 +1603,7 @@ function viewFI(){
      SCR1 ${esc(so('SCR1')?.ini)} → SCR2 ${esc(so('SCR2')?.ini)} → FI ${esc(so('FI')?.ini)} · final instance downloaded (the complete audit trail).</div>
     <div class="gatebox"><button class="primary" onclick="saveInstance()">Download final instance again</button>
      <button onclick="exportFeedback()">Export feedback JSON</button>
+     <button onclick="nextJob()">Next job → (keeps key + identity)</button>
      <span class="hint">Send the instance (or the slim feedback file) back to Tyler — this is what tunes the next build.</span></div>`
   :`${qtyCard}<div class="checklist">
      <label class="${open.length?'auto-no':'auto-ok'}"><input type="checkbox" disabled ${open.length?'':'checked'}>
