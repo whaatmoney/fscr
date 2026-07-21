@@ -402,7 +402,7 @@ function freshInstance(){return {schema:'qpc.fscr.beta/v2',createdAt:new Date().
 // asserts the zip name matches BUILD.id). Rendered in the footer so the floor
 // can see which build a tab is running; stamped into every saved instance so
 // harvests carry build attribution.
-const BUILD={id:'r20g',updated:'2026-07-21'};
+const BUILD={id:'r21b',updated:'2026-07-21'};
 addEventListener('DOMContentLoaded',()=>{const el=document.getElementById('build-stamp');
   if(el)el.textContent='FSCR Beta — build '+BUILD.id+' · updated '+BUILD.updated+' · if the floor announcement names a newer build, refresh this tab.'});
 const CHG={seq:0,saved:0,baseline:false};
@@ -798,6 +798,176 @@ window.clearBatch=()=>{if(BATCH.items.some(i=>i.job&&i.job.stage==='SCR1')&&!con
 window.backToBatch=()=>{S=null;render()};
 window.addEventListener('beforeunload',e=>{
   if(BATCH.running||BATCH.items.some(i=>i.job&&i.job.stage==='SCR1')){e.preventDefault();e.returnValue=''}});
+
+// ---- r21 BATCH SCR2 (approved design §5.1b) --------------------------------
+// Up to 15 instance files, one ISOLATED job row each; travelers matched by
+// EXACT WO from the file name — unmatched / duplicate-matched / ambiguous
+// documents are REFUSED, never guessed. Workers receive explicit job objects
+// (runScr2For) — the global S is never swapped. Concurrency 2. One job's
+// failure never stops the queue. Review/disposition/sign-off stay PER JOB.
+const BATCH2={items:[],refused:[],running:false};
+const B2_CAP=15; // first release (§5.1b); raise only after a real floor batch
+function b2WoFromName(name){const m=String(name).match(/\b(\d{5}(?:WA)?)\b/);return m?m[1]:null}
+// PURE validation — refusal semantics are deterministic and testable
+function b2ValidateInstance(o,fileName,existing){
+  if(!o||(o.schema!=='qpc.fscr.beta/v1'&&o.schema!=='qpc.fscr.beta/v2'))return{ok:false,reason:'not an FSCR beta instance file'};
+  const fnWo=b2WoFromName(fileName);
+  const instWo=(String(o.wo||'').match(/^(\d{5}(?:WA)?)$/)||[])[1];
+  if(!fnWo)return{ok:false,reason:'no WO number in the file name — matching is by exact WO; refused, never guessed'};
+  if(!instWo)return{ok:false,reason:'instance has no valid internal WO'};
+  if(fnWo!==instWo)return{ok:false,reason:'file name says WO '+fnWo+' but the instance says WO '+instWo+' — identity mismatch (43756 class); refused'};
+  if(o.stage!=='SCR2')return{ok:false,reason:'instance is at stage '+o.stage+' — batch SCR2 takes SCR2-stage jobs only'};
+  if(!o.docs||!o.docs.po)return{ok:false,reason:'instance has no embedded PO — the comparison authority is missing'};
+  if(existing.some(it=>it.job&&it.job.wo===instWo))return{ok:false,reason:'WO '+instWo+' is already loaded — a second instance would make traveler matching ambiguous; refused'};
+  return{ok:true,wo:instWo}}
+// PURE matching — exact WO; duplicate match refuses BOTH claimants
+function b2MatchTraveler(fileName,items){const wo=b2WoFromName(fileName);
+  if(!wo)return{ok:false,reason:'no WO number in the traveler file name — refused, never guessed'};
+  const targets=items.filter(it=>it.job&&it.job.wo===wo);
+  if(targets.length===0)return{ok:false,reason:'WO '+wo+' matches no loaded instance — refused'};
+  if(targets.length>1)return{ok:false,reason:'WO '+wo+' matches '+targets.length+' instances — ambiguous; refused'};
+  if(targets[0].traveler)return{ok:false,reason:'WO '+wo+' already has traveler "'+targets[0].traveler.name+'" — duplicate match; BOTH refused, re-stage the correct one',clearTarget:true,wo};
+  return{ok:true,item:targets[0],wo}}
+// §5.1b post-read identity check: the traveler the MODEL read must report
+// this job's WO/customer — a mismatch is ERROR and applies NO ledger changes
+function b2IdentityCheck(job){const rows=(job.scr2Report&&job.scr2Report.travelerComparison)||[];
+  const find=re=>rows.find(r=>re.test(String(r.field||'')));
+  const woRow=find(/\bWO\b|WORK\s*ORDER/i);
+  if(woRow&&woRow.travelerValue&&!/UNCLEAR|NOT_ON/i.test(String(woRow.status||''))){
+    if(norm(woRow.travelerValue).indexOf(norm(job.wo))<0)
+      return 'traveler reports WO "'+woRow.travelerValue+'" but this instance is WO '+job.wo}
+  const cRow=find(/CUSTOMER/i);
+  if(cRow&&cRow.travelerValue&&!/UNCLEAR|NOT_ON/i.test(String(cRow.status||''))){
+    const rep=norm(cRow.travelerValue);
+    const tok=String(job.customer||'').toUpperCase().replace(/[^A-Z0-9 ]/g,' ').split(/\s+/).filter(w=>w.length>=4)[0];
+    if(tok&&rep&&rep.indexOf(norm(tok))<0)
+      return 'traveler reports customer "'+cRow.travelerValue+'" but this instance is '+job.customer}
+  return null}
+// IndexedDB persistence (resume after refresh — 15 embedded-doc jobs exceed localStorage)
+function b2Db(){return new Promise((res,rej)=>{const q=indexedDB.open('fscr-batch2',1);
+  q.onupgradeneeded=()=>q.result.createObjectStore('kv');
+  q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)})}
+async function b2Persist(){try{const db=await b2Db();
+  await new Promise((res,rej)=>{const tx=db.transaction('kv','readwrite');
+    tx.objectStore('kv').put(JSON.parse(JSON.stringify({items:BATCH2.items,refused:BATCH2.refused,at:new Date().toISOString()})),'state');
+    tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});db.close()}catch(e){}}
+async function b2Restore(){try{const db=await b2Db();
+  const st=await new Promise((res,rej)=>{const q=db.transaction('kv').objectStore('kv').get('state');
+    q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)});db.close();
+  if(st&&st.items&&st.items.length){
+    BATCH2.items=st.items.map(x=>({...x,status:x.status==='RUNNING'?'READY':x.status})); // a run interrupted by refresh re-queues; no partial ledger changes exist (identity gate applies after mapping)
+    BATCH2.refused=st.refused||[];return true}}catch(e){}return false}
+window.b2Discard=async()=>{if(!confirm('Discard the whole batch? Unsaved per-job work in these rows is lost (export the ZIP first if needed).'))return;
+  BATCH2.items=[];BATCH2.refused=[];
+  try{const db=await b2Db();await new Promise((res,rej)=>{const tx=db.transaction('kv','readwrite');
+    tx.objectStore('kv').delete('state');tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});db.close()}catch(e){}
+  render()};
+window.b2LoadInstances=inp=>{let fs=[...inp.files];inp.value='';if(!fs.length)return;
+  const room=B2_CAP-BATCH2.items.length;
+  if(room<=0){alert('Batch SCR2 caps at '+B2_CAP+' instances (first release).');return}
+  if(fs.length>room){alert('Batch SCR2 caps at '+B2_CAP+' — taking the first '+room+'.');fs=fs.slice(0,room)}
+  let done=0;const finish=()=>{if(done===fs.length){b2Persist();render()}};
+  fs.forEach(f=>{const r=new FileReader();
+    r.onload=()=>{let o=null,err=null;
+      try{o=JSON.parse(r.result)}catch(e){err='not JSON: '+e.message}
+      const v=err?{ok:false,reason:err}:b2ValidateInstance(o,f.name,BATCH2.items);
+      if(!v.ok){BATCH2.refused.push({name:f.name,kind:'instance',reason:v.reason})}
+      else{migrateInstance(o,today());ensurePriceItem(o);featureMigrate(o);
+        BATCH2.items.push({id:'b2-'+o.wo,name:f.name,job:o,traveler:null,status:'NEEDS-TRAVELER',error:null,ms:0,cost:0})}
+      done++;finish()};
+    r.onerror=()=>{BATCH2.refused.push({name:f.name,kind:'instance',reason:'file unreadable'});done++;finish()};
+    r.readAsText(f)})};
+window.b2LoadTravelers=inp=>{let fs=[...inp.files];inp.value='';if(!fs.length)return;
+  let done=0;const finish=()=>{if(done===fs.length){b2Persist();render()}};
+  fs.forEach(f=>{const m=b2MatchTraveler(f.name,BATCH2.items);
+    if(!m.ok){BATCH2.refused.push({name:f.name,kind:'traveler',reason:m.reason});
+      if(m.clearTarget){const t=BATCH2.items.find(it=>it.job&&it.job.wo===m.wo);
+        if(t&&t.traveler){BATCH2.refused.push({name:t.traveler.name,kind:'traveler',reason:'duplicate match on WO '+m.wo+' — both refused'});
+          t.traveler=null;t.status='NEEDS-TRAVELER'}}
+      done++;finish();return}
+    const rd=new FileReader();
+    rd.onload=()=>{m.item.traveler={name:f.name,b64:String(rd.result).slice(String(rd.result).indexOf(',')+1)};
+      m.item.status='READY';m.item.error=null;done++;finish()};
+    rd.onerror=()=>{BATCH2.refused.push({name:f.name,kind:'traveler',reason:'file unreadable'});done++;finish()};
+    rd.readAsDataURL(f)})};
+async function b2Worker(queue){while(queue.length){const it=queue.shift();
+  it.status='RUNNING';render();
+  const snapshot=JSON.stringify(it.job.ledger); // identity gate: no ledger changes on mismatch
+  const c0=(it.job.metrics&&it.job.metrics.totalCost)||0;const t0=Date.now();
+  try{
+    it.job.docs.traveler={name:it.traveler.name,b64:it.traveler.b64};
+    await runScr2For(it.job);
+    const idErr=b2IdentityCheck(it.job);
+    if(idErr){it.job.ledger=JSON.parse(snapshot);delete it.job.scr2Report;
+      it.status='ERROR';it.error='IDENTITY MISMATCH — '+idErr+' (no ledger changes applied)'}
+    else{it.status='DONE';it.error=null}
+  }catch(e){it.status='ERROR';it.error=e.message} // one failure never stops the queue
+  it.ms=Date.now()-t0;
+  it.cost=Math.round((((it.job.metrics&&it.job.metrics.totalCost)||0)-c0)*10000)/10000;
+  b2Persist();render()}}
+window.b2Run=async()=>{if(!KEY.v){alert('Activate the API key first.');return}
+  if(BATCH2.running)return;
+  const queue=BATCH2.items.filter(it=>it.status==='READY');
+  if(!queue.length){alert('No READY jobs — each instance needs its exact-WO-matched traveler.');return}
+  BATCH2.running=true;render();
+  await Promise.all([b2Worker(queue),b2Worker(queue)]); // concurrency 2 (§5.1b initial)
+  BATCH2.running=false;b2Persist();render();
+  toast('Batch SCR2 — '+BATCH2.items.filter(i=>i.status==='DONE').length+' done · '+BATCH2.items.filter(i=>i.status==='ERROR').length+' error')};
+window.b2Open=wo=>{const it=BATCH2.items.find(x=>x.job&&x.job.wo===wo);if(!it)return;
+  S=it.job;persistDraft();render()};
+window.b2Back=()=>{S=null;b2Persist();render()};
+// minimal STORE-mode ZIP (no deps) — §5.1b: ONE archive, never 15 downloads
+function crc32(u8){let c;const t=crc32.t||(crc32.t=(()=>{const t=new Uint32Array(256);
+  for(let n=0;n<256;n++){c=n;for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);t[n]=c}return t})());
+  c=0xFFFFFFFF;for(let i=0;i<u8.length;i++)c=t[(c^u8[i])&0xFF]^(c>>>8);return (c^0xFFFFFFFF)>>>0}
+function buildZip(files){
+  const parts=[];const central=[];let off=0;
+  const u16=v=>[v&255,(v>>8)&255];const u32=v=>[v&255,(v>>8)&255,(v>>16)&255,(v>>>24)&255];
+  for(const f of files){const nm=new TextEncoder().encode(f.name);const crc=crc32(f.data);
+    const lh=new Uint8Array([0x50,0x4B,3,4].concat(u16(20),u16(0),u16(0),u16(0),u16(0),u32(crc),u32(f.data.length),u32(f.data.length),u16(nm.length),u16(0)));
+    parts.push(lh,nm,f.data);central.push({nm,crc,size:f.data.length,off});
+    off+=lh.length+nm.length+f.data.length}
+  const cdStart=off;
+  for(const c of central){const cd=new Uint8Array([0x50,0x4B,1,2].concat(u16(20),u16(20),u16(0),u16(0),u16(0),u16(0),u32(c.crc),u32(c.size),u32(c.size),u16(c.nm.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(c.off)));
+    parts.push(cd,c.nm);off+=cd.length+c.nm.length}
+  parts.push(new Uint8Array([0x50,0x4B,5,6].concat(u16(0),u16(0),u16(central.length),u16(central.length),u32(off-cdStart),u32(cdStart),u16(0))));
+  let total=0;for(const p of parts)total+=p.length;
+  const out=new Uint8Array(total);let o=0;for(const p of parts){out.set(p,o);o+=p.length}
+  return out}
+window.b2SaveAll=()=>{
+  const done=BATCH2.items.filter(it=>it.status==='DONE'||it.status==='ERROR');
+  if(!done.length){alert('Nothing to export yet — run the batch first.');return}
+  const files=done.map(it=>{const J=it.job;J.lastSavedBuildId=BUILD.id;
+    J.history.push({at:new Date().toISOString(),stage:J.stage,by:RV.ini||'',build:BUILD.id,event:'SAVE'});
+    return{name:'fscr_'+(J.wo||J.po||'job').replace(/[^A-Za-z0-9-]/g,'')+'_'+J.stage+'.json',data:new TextEncoder().encode(JSON.stringify(J))}});
+  const zip=buildZip(files);
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([zip],{type:'application/zip'}));
+  a.download='fscr_batch_scr2_'+today().replace(/-/g,'')+'.zip';a.click();
+  b2Persist();toast('✓ '+files.length+' updated instance'+(files.length===1?'':'s')+' exported in ONE zip')};
+function viewBatch2(){
+  const B=BATCH2;const ready=B.items.filter(i=>i.status==='READY').length;
+  const badge=s=>({'NEEDS-TRAVELER':'<span class="badge">NEEDS TRAVELER</span>','READY':'<span class="badge b-navy">READY</span>',
+    'RUNNING':'<span class="badge b-alert">RUNNING…</span>','DONE':'<span class="badge b-ok">DONE</span>',
+    'ERROR':'<span class="badge b-hold">ERROR</span>'}[s]||esc(s));
+  return `<div class="card"><button onclick="BATCH2.show=false;render()" style="float:right">← Start screen</button><b>Batch SCR2</b> <span class="hint">— up to ${B2_CAP} instances; travelers matched by EXACT WO; unmatched/duplicate/ambiguous documents are refused, never guessed; review + sign-off stay per job</span><br><br>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+      <label>Instances (.json): <input type="file" multiple accept="application/json" onchange="b2LoadInstances(this)"></label>
+      <label>Travelers (.pdf): <input type="file" multiple accept="application/pdf" onchange="b2LoadTravelers(this)"></label>
+      <button class="primary" ${ready&&!B.running?'':'disabled'} onclick="b2Run()">▶ Run ${ready} job${ready===1?'':'s'} (2 at a time)</button>
+      <button onclick="b2SaveAll()">💾 Save all — one ZIP</button>
+      <button onclick="b2Discard()">Discard batch</button>
+    </div>
+    ${B.items.map(it=>`<div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px">
+      <span class="mono" style="font-size:12px;flex:1;min-width:230px"><b>WO ${esc(it.job.wo)}</b> · ${esc(it.job.customer)}<br><span class="hint">${esc(it.name)}${it.traveler?' + '+esc(it.traveler.name):''}</span></span>
+      ${badge(it.status)}
+      ${it.ms?`<span class="hint">${Math.round(it.ms/1000)}s · $${(it.cost||0).toFixed(2)}</span>`:''}
+      ${it.error?`<span class="hint" style="color:var(--bad);flex-basis:100%">${esc(it.error)}</span>`:''}
+      <button onclick="b2Open('${escA(it.job.wo)}')">Open</button>
+    </div>`).join('')||'<p class="note">No instances loaded yet.</p>'}
+    ${B.refused.length?`<details style="margin-top:8px" open><summary class="hint" style="color:var(--bad)">⚠ ${B.refused.length} document${B.refused.length===1?'':'s'} REFUSED (never guessed)</summary>
+      ${B.refused.map(r=>`<div class="hint" style="color:var(--bad)">✖ ${esc(r.name)} — ${esc(r.reason)}</div>`).join('')}</details>`:''}
+  </div>`}
+b2Restore().then(ok=>{if(ok&&typeof render==='function')render()});
 // ---- single/staged entry ----
 window.stageBatchInput=inp=>{let fs=[...inp.files];if(!fs.length)return;
   if(fs.length>30){alert('Max 30 POs per batch \u2014 taking the first 30.');fs=fs.slice(0,30)}
@@ -865,42 +1035,50 @@ window.removeLabelDoc=i=>{const a=labelDocs();const d=a[i];if(!d)return;
   a.splice(i,1);S.docs.labels=a.length?a:undefined;persistDraft();render();toast('Removed label file — '+d.name)};
 window.uploadDoc=async(inp,slot)=>{window.stageDoc(inp,slot)};
 
+// r21 (§5.1b architecture ruling): the SCR2 audit + mapping path takes an
+// EXPLICIT job object — batch workers receive and return their own job;
+// the global S is never swapped. The single-job flow passes S itself.
+async function runScr2For(job){
+  const D=job.docs;
+  const content=[{type:'text',text:'DOCUMENT 1 — CURRENT PO (PO v1, the comparison authority):'},contentBlockFor(D.po),
+    {type:'text',text:'DOCUMENT 2 — COMPLETED TRAVELER (TRAVELER v1, audit subject):'},contentBlockFor(D.traveler)];
+  if(D.print){content.push({type:'text',text:'DOCUMENT 3 — PART PRINT (PRINT v1) — CROSS-REFERENCE ONLY, never authority:'},contentBlockFor(D.print));}
+  content.push({type:'text',text:'Audit the traveler against the PO. Read every page. Call emit_scr2 exactly once.'});
+  const raw=await callClaude(DATA.scr2.system,DATA.scr2.tool,content,'SCR2 audit — '+(job.wo||job.po||''));addStageMetrics(job,'SCR2');
+  job.scr2Report={travelerComparison:raw.travelerComparison||[],
+    summary:raw.summary||'',analyzedAt:new Date().toISOString()};
+  const seenNew=new Set(); // within-response exact-fingerprint dedupe only
+  (raw.discrepancies||[]).forEach((d,ix)=>{
+    if(bareCertSuppressed(d))return; // r20b correction 6: bare standard C-of-C never becomes a ledger item
+    const pc=classifyPriceFinding(d); // r20c blocker 1: shared classifier
+    if(pc==='ROUTINE_DUP')return;
+    if(pc==='FOLD'){consolidatePrice(d,'SCR2',job);return} // r20: one price item per job
+    const disp=findDisposition(d.label||'',d.field||'',d.poValue||'',d.foundValue||'',job);
+    if(disp){(disp.carried=disp.carried||[]).push({stage:'SCR2',at:new Date().toISOString()});return}
+    const ex=findExisting(d.label||'',d.field||'',d.poValue||'',d.foundValue||'',job);
+    if(ex){maybeSpecialize(ex,d,'SCR2');return} // already tracked (open/resolved); r20: evidence specializes a generic prior
+    const fpKey=norm(d.label||'')+'|'+norm(d.field||'')+'|'+norm(d.poValue||'')+'|'+norm(d.foundValue||'');
+    if(seenNew.has(fpKey))return;seenNew.add(fpKey);
+    job.ledger.push({id:nextLedgerId('s2-',job),label:d.label||'',field:d.field||'',cls:d.class==='HOLD'?'HOLD':'ALERT',
+      gate:GATE_ORDER.includes(d.gate)?d.gate:'PACKAGING',tier:d.tier||3,act:d.action||'',why:d.why||'',
+      from:'SCR2',poValue:d.poValue||'',foundValue:d.foundValue||'',corrected:d.correctedValue||'',
+      ise:d.internalSourceEligible===true,state:'OPEN',res:null,audit:[]});});
+  return job;
+}
 window.runScr2=async()=>{
   if(!KEY.v){alert('Activate the API key first.');return}
   const D=S.docs;
   if(!D.po){alert('SCR2 refuses to run without the current PO — the PO is the comparison authority.');return}
   if(!D.traveler){alert('SCR2 needs the completed traveler. (Labels are generated at SCR2 and verified at Final Inspection.)');return}
   try{
-    const content=[{type:'text',text:'DOCUMENT 1 — CURRENT PO (PO v1, the comparison authority):'},contentBlockFor(D.po),
-      {type:'text',text:'DOCUMENT 2 — COMPLETED TRAVELER (TRAVELER v1, audit subject):'},contentBlockFor(D.traveler)];
-    if(D.print){content.push({type:'text',text:'DOCUMENT 3 — PART PRINT (PRINT v1) — CROSS-REFERENCE ONLY, never authority:'},contentBlockFor(D.print));}
-    content.push({type:'text',text:'Audit the traveler against the PO. Read every page. Call emit_scr2 exactly once.'});
-    const raw=await callClaude(DATA.scr2.system,DATA.scr2.tool,content,'SCR2 audit');addStageMetrics(S,'SCR2');
-    S.scr2Report={travelerComparison:raw.travelerComparison||[],
-      summary:raw.summary||'',analyzedAt:new Date().toISOString()};
-    const seenNew=new Set(); // within-response exact-fingerprint dedupe only
-    (raw.discrepancies||[]).forEach((d,ix)=>{
-      if(bareCertSuppressed(d))return; // r20b correction 6: bare standard C-of-C never becomes a ledger item
-      const pc=classifyPriceFinding(d); // r20c blocker 1: shared classifier
-      if(pc==='ROUTINE_DUP')return;
-      if(pc==='FOLD'){consolidatePrice(d,'SCR2');return} // r20: one price item per job
-      const disp=findDisposition(d.label||'',d.field||'',d.poValue||'',d.foundValue||'');
-      if(disp){(disp.carried=disp.carried||[]).push({stage:'SCR2',at:new Date().toISOString()});return}
-      const ex=findExisting(d.label||'',d.field||'',d.poValue||'',d.foundValue||'');
-      if(ex){maybeSpecialize(ex,d,'SCR2');return} // already tracked (open/resolved); r20: evidence specializes a generic prior
-      const fpKey=norm(d.label||'')+'|'+norm(d.field||'')+'|'+norm(d.poValue||'')+'|'+norm(d.foundValue||'');
-      if(seenNew.has(fpKey))return;seenNew.add(fpKey);
-      S.ledger.push({id:nextLedgerId('s2-'),label:d.label||'',field:d.field||'',cls:d.class==='HOLD'?'HOLD':'ALERT',
-        gate:GATE_ORDER.includes(d.gate)?d.gate:'PACKAGING',tier:d.tier||3,act:d.action||'',why:d.why||'',
-        from:'SCR2',poValue:d.poValue||'',foundValue:d.foundValue||'',corrected:d.correctedValue||'',
-        ise:d.internalSourceEligible===true,state:'OPEN',res:null,audit:[]});});
+    await runScr2For(S);
     persistDraft();render();
   }catch(e){render();alert('SCR2 audit failed: '+e.message)}
 };
 // collision-free ledger-id allocator (r7 correction 1): permanent IDs are never
 // derived from a response's array position — a changed/reordered rerun must
 // never append a different finding under an existing id.
-function nextLedgerId(prefix){const used=new Set((S.ledger||[]).map(i=>String(i.id)));
+function nextLedgerId(prefix,J){J=J||S;const used=new Set((J.ledger||[]).map(i=>String(i.id)));
   let n=1;while(used.has(prefix+n))n++;return prefix+n}
 window.runFi=async()=>{
   if(!KEY.v){alert('Activate the API key first.');return}
@@ -1258,9 +1436,9 @@ function priceFp(label,po,found,stage){return norm(label||'')+'|'+norm(po||'')+'
 // prefer the deterministic id:'price-1', never whichever appears first
 function priceItemOf(led){const ps=(led||[]).filter(x=>x.kind==='price');
   return ps.find(x=>String(x.id)==='price-1')||ps[0]||null}
-function consolidatePrice(d,stage){
-  let it=priceItemOf(S.ledger);
-  if(!it){ensurePriceItem(S);it=priceItemOf(S.ledger);}
+function consolidatePrice(d,stage,J){J=J||S; // r21: explicit job object
+  let it=priceItemOf(J.ledger);
+  if(!it){ensurePriceItem(J);it=priceItemOf(J.ledger);}
   if(!it)return;
   // r20d B1-3: the PO statement is evidence too — fingerprint and ref carry
   // the verbatim clause (poValue first, poStates fallback)
@@ -1305,10 +1483,10 @@ function fingerprintMatch(i,key,f,po,fo){
   const legacyStored=(i.from==='SCR1'||i.from==='MIGRATION'||i.from==='CATCH-UP')&&!iPo&&!iFo;
   if(fpLabel(i.label)===key)return legacyStored;
   return false;}
-function findDisposition(label,field,poValue,foundValue){
+function findDisposition(label,field,poValue,foundValue,J){J=J||S; // r21: explicit job object — never global-S swapped
   const key=fpLabel(label),f=norm(field||''),po=norm(poValue||''),fo=norm(foundValue||'');
   const fam=issueFamily({label,field,poValue,foundValue});
-  return S.ledger.find(i=>{const st=i.state||(i.res?'RESOLVED':'OPEN');
+  return J.ledger.find(i=>{const st=i.state||(i.res?'RESOLVED':'OPEN');
     const disposed=DISPOSED_STATES.includes(st)||(st==='RESOLVED'&&i.res&&i.res.outcome==='INTERNAL CONTROLLED SOURCE');
     if(!disposed)return false;
     if(fingerprintMatch(i,key,f,po,fo))return true;
@@ -1321,10 +1499,10 @@ function findDisposition(label,field,poValue,foundValue){
 // found all equal, blanks included) or a substantive fingerprint match is the
 // same already-visible finding — skipping it duplicates nothing and hides
 // nothing, because the item is still on the ledger gating the job.
-function findExisting(label,field,poValue,foundValue){
+function findExisting(label,field,poValue,foundValue,J){J=J||S; // r21: explicit job object
   const key=fpLabel(label),f=norm(field||''),po=norm(poValue||''),fo=norm(foundValue||'');
   const fam=issueFamily({label,field,poValue,foundValue});
-  return S.ledger.find(i=>{const st=i.state||(i.res?'RESOLVED':'OPEN');
+  return J.ledger.find(i=>{const st=i.state||(i.res?'RESOLVED':'OPEN');
     const disposed=DISPOSED_STATES.includes(st)||(st==='RESOLVED'&&i.res&&i.res.outcome==='INTERNAL CONTROLLED SOURCE');
     if(disposed)return false;
     if(fpLabel(i.label)===key&&norm(i.field||'')===f&&norm(i.poValue||'')===po&&norm(i.foundValue||'')===fo)return true;
@@ -1691,6 +1869,11 @@ function viewLanding(){
   <div class="card"><b style="font-size:12px">Continue a job — load an instance</b><br>
     <span class="hint">Someone handed you an instance file (SCR2 or Final Inspection duty).</span><br><br>
     <input type="file" accept=".json" onchange="loadFile(this)"></div>
+  <div class="card"><b style="font-size:12px">Batch SCR2 — audit up to 15 jobs in one sitting</b><br>
+    <span class="hint">Load up to ${B2_CAP} SCR2-stage instance files plus their travelers in bulk — matched by EXACT WO
+    from the file names; anything unmatched, duplicate, or ambiguous is refused, never guessed. Audits run 2 at a time;
+    one job's failure never stops the rest. Review, dispositions, and sign-off stay per job.</span><br><br>
+    <button onclick="BATCH2.show=true;render()">Open Batch SCR2 →</button></div>
   <div class="card"><b style="font-size:12px">Catch up a mid-stream job — enter at SCR2 or Final Inspection</b><br>
     <span class="hint">The job started outside FSCR (SCR1 done on paper / straight into Access) and there is no instance
     file. Enter its context — prior sign-offs are recorded as outside-FSCR, and reviewer independence is still enforced
@@ -1981,7 +2164,7 @@ function render(){
   updateTopbar();
   $('#who').textContent=S?`stage: ${S.stage}${S.wo?' · WO '+S.wo:''}${S.po?' · PO '+S.po:''}`:'';
   const m=$('#main');
-  if(!S){m.innerHTML=BATCH.items.length?viewBatch():viewLanding();return}
+  if(!S){m.innerHTML=BATCH.items.length?viewBatch():((BATCH2.show||BATCH2.items.length||BATCH2.refused.length)?viewBatch2():viewLanding());return}
   if(!KEY.v&&(S.stage==='SCR1'&&!S.scr1)){m.innerHTML=viewLanding();return}
   if(S.stage==='SCR1')m.innerHTML=viewSCR1();
   else if(S.stage==='SCR2')m.innerHTML=viewSCR2();
