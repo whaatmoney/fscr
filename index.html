@@ -402,7 +402,7 @@ function freshInstance(){return {schema:'qpc.fscr.beta/v2',createdAt:new Date().
 // asserts the zip name matches BUILD.id). Rendered in the footer so the floor
 // can see which build a tab is running; stamped into every saved instance so
 // harvests carry build attribution.
-const BUILD={id:'r21b',updated:'2026-07-21'};
+const BUILD={id:'r22',updated:'2026-07-21'};
 addEventListener('DOMContentLoaded',()=>{const el=document.getElementById('build-stamp');
   if(el)el.textContent='FSCR Beta — build '+BUILD.id+' · updated '+BUILD.updated+' · if the floor announcement names a newer build, refresh this tab.'});
 const CHG={seq:0,saved:0,baseline:false};
@@ -1527,6 +1527,28 @@ window.deferPriceToShip=id=>{if(needRv())return;const it=lit(id);if(!it)return;
   it.state='DEFERRED';it.deferredTo='SHIP';
   lAudit(it,'DEFERRED → SHIP (SCR1 default)',RV.ini,'Price verified against quote/DB at or before shipment — ruling 2026-07-16');
   persistDraft();render();toast('Deferred to SHIP — price verification stays open until closed with a quote/DB reference')};
+// r22 PRICE PARK FLAGS (Tyler-approved spec 2026-07-21, from DP's WO 43824
+// report): two AUDITED flags on kind:price items that record who owns the
+// next move while verification stays open — they NEVER close the item, never
+// change state, never move the gate, never permit FI close. Typed-evidence
+// closure and the SP0120/G1 override are untouched; resolution clears active
+// parks (audited).
+window.addPark=(id,kind,btn)=>{if(needRv())return;const it=lit(id);if(!it||it.kind!=='price')return;
+  const f=btn.closest('.parkform');
+  const name=kind==='MANAGER CHECK'?String((f.querySelector('input.mgr')||{}).value||'').trim():'';
+  const by=String((f.querySelector('input.ini')||{}).value||'').trim();
+  if(!by){alert('Initials are required.');return}
+  if(kind==='MANAGER CHECK'&&!name){alert('Name the manager the check was requested from.');return}
+  it.parks=it.parks||[];
+  if(it.parks.some(p=>p.kind===kind)){alert(kind+' is already requested on this item.');return}
+  it.parks.push({kind,name:name||undefined,by,date:today()});
+  lAudit(it,'PARKED — '+kind+' REQUESTED'+(name?' ('+name+')':''),by,'flag only — item stays '+(it.state||'OPEN')+'; gate unchanged; verification still required');
+  persistDraft();render();toast('\u23f8 '+kind+' REQUESTED recorded — the item stays open; this never closes price verification')};
+window.clearPark=(id,kind)=>{if(needRv())return;const it=lit(id);if(!it||!it.parks)return;
+  const ix=it.parks.findIndex(p=>p.kind===kind);if(ix<0)return;
+  it.parks.splice(ix,1);
+  lAudit(it,'PARK CLEARED — '+kind,RV.ini,'cleared without closure; item stays '+(it.state||'OPEN'));
+  persistDraft();render();toast('Park flag cleared — item stays '+(it.state||'OPEN'))};
 window.resolveL=(id,btn)=>{
   const f=btn.closest('.rform');const it=lit(id);
   const outcome=f.querySelector('select').value;
@@ -1563,6 +1585,7 @@ window.resolveL=(id,btn)=>{
   }
   it.res={outcome,note,src:srcStore||undefined,by,date:today()};it.state='RESOLVED';
   if(adjud)it.adjud=adjud;
+  if(it.parks&&it.parks.length){lAudit(it,'PARKS CLEARED by resolution',by,it.parks.map(p=>p.kind).join(' · '));it.parks=[];}
   lAudit(it,'RESOLVED — '+outcome,by,note+(srcStore?' [source: '+srcStore+']':''));
   persistDraft();render();toast(outcome==='INTERNAL CONTROLLED SOURCE'?'✓ Accepted — internal controlled source recorded ('+by+')':'✓ Closed — '+outcome.toLowerCase()+' ('+by+')')};
 window.deferL=(id,btn)=>{
@@ -1608,7 +1631,7 @@ function ledgerCard(i,showResolve){
     :`<span class="badge ${i.cls==='HOLD'?'b-hold':'b-alert'}">${i.cls}</span>`;
   const outcomes=(i.kind==='price')?['PRICE VERIFIED']:(i.ise?L_OUTCOMES.concat(['INTERNAL CONTROLLED SOURCE']):L_OUTCOMES);
   return `<div class="issue ${st==='RESOLVED'?'res':i.cls==='HOLD'?'hold':'alert'}">
-    ${badge}${i.legacyUnaudited?' <span class="badge b-alert">LEGACY — UNAUDITED</span>':''}${(i.carried&&i.carried.length)?` <span class="badge b-navy">${i.carried[i.carried.length-1].specialized?'SPECIALIZED BY EVIDENCED RESTATEMENT':'PREVIOUSLY DISPOSITIONED — CARRIED FORWARD'} (${esc(i.carried[i.carried.length-1].stage)})</span>`:''}
+    ${badge}${i.legacyUnaudited?' <span class="badge b-alert">LEGACY — UNAUDITED</span>':''}${(i.carried&&i.carried.length)?` <span class="badge b-navy">${i.carried[i.carried.length-1].specialized?'SPECIALIZED BY EVIDENCED RESTATEMENT':'PREVIOUSLY DISPOSITIONED — CARRIED FORWARD'} (${esc(i.carried[i.carried.length-1].stage)})</span>`:''}${(i.parks||[]).map(p=>` <span class="badge b-navy" title="Park flag — audited; never closes the item, never moves the gate">\u23f8 ${esc(p.kind)} REQUESTED — ${p.name?esc(p.name)+' · ':''}${esc(p.by)} ${p.date}${st!=='RESOLVED'&&showResolve?` <a href="#" style="color:inherit" title="Clear this park flag (audited)" onclick="clearPark('${i.id}','${p.kind}');return false">✕</a>`:''}</span>`).join('')}
     <span class="lab">${esc(i.label)}</span>
     <span class="meta">${st==='RESOLVED'?`${esc(i.res.outcome||'')} · ${esc(i.res.by)} · ${i.res.date} · ${esc(i.res.note)}${i.res.src?' · source: '+esc(i.res.src):''}${i.adjud?' · adjudged: '+esc(i.adjud.validity)+' / '+esc(i.adjud.value):''}`
       :st==='OVERRIDDEN'?`override: ${esc(i.override?.approver||'')} · Access ref ${esc(i.override?.accessRef||'')} · ${esc((i.override?.at||'').slice(0,10))} · recorded by ${esc(i.override?.by||'')} — verification still outstanding`
@@ -1644,6 +1667,12 @@ function ledgerCard(i,showResolve){
       <input class="aref" placeholder="Access record / reference (required)">
       <input class="ini" placeholder="Your initials" value="${escA(RV.ini)}">
       <button onclick="overrideL('${i.id}',this)">Record override</button></div>`:''}
+    ${st!=='RESOLVED'&&showResolve&&i.kind==='price'?`<div class="parkform rform" style="border-top:1px dashed var(--line);padding-top:6px">
+      <span class="hint" style="flex-basis:100%">Park (audited flags — record who owns the next move; NEVER closes the item or moves the gate; verification still required to resolve):</span>
+      <input class="mgr" placeholder="Manager name (for manager check)">
+      <input class="ini" placeholder="Initials" value="${escA(RV.ini)}">
+      <button onclick="addPark('${i.id}','MANAGER CHECK',this)">\u23f8 Manager check requested</button>
+      <button onclick="addPark('${i.id}','REVISED PO',this)">\u23f8 Revised PO requested</button></div>`:''}
     ${st!=='RESOLVED'&&showResolve?`<details style="font-size:11px;margin-top:2px"><summary class="hint">Defer / reassign gate (audited)</summary>
       <div class="rform">${gateSelect(i.deferredTo||i.gate)}
         <input class="ev" placeholder="Reason (required)"><input class="ini" placeholder="Initials" value="${escA(RV.ini)}">
