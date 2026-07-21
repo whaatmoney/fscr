@@ -402,7 +402,7 @@ function freshInstance(){return {schema:'qpc.fscr.beta/v2',createdAt:new Date().
 // asserts the zip name matches BUILD.id). Rendered in the footer so the floor
 // can see which build a tab is running; stamped into every saved instance so
 // harvests carry build attribution.
-const BUILD={id:'r20f',updated:'2026-07-20'};
+const BUILD={id:'r20g',updated:'2026-07-21'};
 addEventListener('DOMContentLoaded',()=>{const el=document.getElementById('build-stamp');
   if(el)el.textContent='FSCR Beta — build '+BUILD.id+' · updated '+BUILD.updated+' · if the floor announcement names a newer build, refresh this tab.'});
 const CHG={seq:0,saved:0,baseline:false};
@@ -813,12 +813,20 @@ window.startScr1Staged=async btn=>{const fs=PENDING.newPo;if(!fs||!fs.length)ret
 };
 const PENDING={};
 const SLOT_LABEL={po:'PO',traveler:'Traveler',labels:'Labels',print:'Print',coc:'COC draft',packSlip:'Pack slip'};
-window.stageDoc=(inp,slot)=>{const f=inp.files[0];if(!f)return;
+function labelDocs(docs=S&&S.docs){const v=docs&&docs.labels;return Array.isArray(v)?v.filter(Boolean):(v?[v]:[])}
+const MAX_LABEL_FILES=30;
+function validUploadFile(f,slot){
+  if(slot==='labels'&&!/\.(docx|pdf)$/i.test(f.name)){alert(f.name+' is not a supported label document — use DOCX or PDF.');return false}
   if(!INTAKE.images&&/\.(png|jpe?g|webp|heic|gif|bmp|tiff?)$/i.test(f.name)){
-    alert('Photo/image intake is disabled pending the export-control & data-handling ruling — upload a PDF scan instead.');inp.value='';return}
-  if(/\.heic$/i.test(f.name)){alert('HEIC photos are not supported by the API \u2014 convert to JPG (iPhone: share \u2192 save as JPG, or Settings \u2192 Camera \u2192 Formats \u2192 Most Compatible).');inp.value='';return}
-  if(f.size>15*1024*1024){alert('File over 15 MB — scan at lower resolution.');inp.value='';return}
-  PENDING[slot]=f;render()};
+    alert('Photo/image intake is disabled pending the export-control & data-handling ruling — upload a PDF scan instead.');return false}
+  if(/\.heic$/i.test(f.name)){alert('HEIC photos are not supported by the API \u2014 convert to JPG (iPhone: share \u2192 save as JPG, or Settings \u2192 Camera \u2192 Formats \u2192 Most Compatible).');return false}
+  if(f.size>15*1024*1024){alert(f.name+' is over 15 MB — scan at lower resolution.');return false}
+  return true
+}
+window.stageDoc=(inp,slot)=>{const fs=Array.from(inp.files||[]);if(!fs.length)return;
+  if(!fs.every(f=>validUploadFile(f,slot))){inp.value='';return}
+  if(slot==='labels'&&labelDocs().length+fs.length>MAX_LABEL_FILES){alert('A job can carry up to '+MAX_LABEL_FILES+' label files. Remove an old file or combine the labels into one DOCX/PDF.');inp.value='';return}
+  PENDING[slot]=slot==='labels'?fs:fs[0];render()};
 window.cancelStage=slot=>{delete PENDING[slot];render()};
 const EDITING={};
 const EXPANDED={}; // verified SCR1 rows collapse (floor request 07-15); click to re-expand
@@ -839,9 +847,22 @@ window.saveField=(k,btn)=>{const ta=btn.parentElement.querySelector('textarea');
   toast('✎ Field edited — re-verify before copy ('+RV.ini+')')};
 window.submitDoc=async(slot,btn)=>{const f=PENDING[slot];if(!f)return;
   btn.disabled=true;btn.textContent='Uploading…';
-  try{S.docs[slot]={name:f.name,b64:await fileB64(f)};delete PENDING[slot];persistDraft();render();
-    toast('✓ '+(SLOT_LABEL[slot]||slot)+' uploaded — '+f.name);
+  try{
+    if(slot==='labels'){
+      const staged=Array.isArray(f)?f:[f];
+      const added=await Promise.all(staged.map(async x=>({name:x.name,b64:await fileB64(x)})));
+      const all=[...labelDocs(),...added];
+      S.docs.labels=all.filter((x,i,a)=>a.findIndex(y=>y.name===x.name&&y.b64===x.b64)===i);
+      toast('✓ '+added.length+' label file'+(added.length===1?'':'s')+' added — '+S.docs.labels.length+' total');
+    }else{
+      S.docs[slot]={name:f.name,b64:await fileB64(f)};
+      toast('✓ '+(SLOT_LABEL[slot]||slot)+' uploaded — '+f.name);
+    }
+    delete PENDING[slot];persistDraft();render();
   }catch(e){btn.disabled=false;btn.textContent='Submit upload';alert('Could not read the file: '+e.message)}};
+window.removeLabelDoc=i=>{const a=labelDocs();const d=a[i];if(!d)return;
+  if(!confirm('Remove label file "'+d.name+'" from this instance?'))return;
+  a.splice(i,1);S.docs.labels=a.length?a:undefined;persistDraft();render();toast('Removed label file — '+d.name)};
 window.uploadDoc=async(inp,slot)=>{window.stageDoc(inp,slot)};
 
 window.runScr2=async()=>{
@@ -884,17 +905,21 @@ function nextLedgerId(prefix){const used=new Set((S.ledger||[]).map(i=>String(i.
 window.runFi=async()=>{
   if(!KEY.v){alert('Activate the API key first.');return}
   const D=S.docs;
+  const labelFiles=labelDocs(D);
   if(!D.po){alert('Final Inspection refuses to run without the current PO.');return}
-  if(!D.coc||!D.packSlip||(!D.labels&&!labelsNotRequired())){alert('Final Inspection needs the COC draft, the pack slip, and the generated labels (labels are made at SCR2, verified here). If this WO genuinely requires no labels, record the declaration in the labels card below — reason required.');return}
+  if(!D.coc||!D.packSlip||(!labelFiles.length&&!labelsNotRequired())){alert('Final Inspection needs the COC draft, the pack slip, and the generated labels (labels are made at SCR2, verified here). If this WO genuinely requires no labels, record the declaration in the labels card below — reason required.');return}
   try{
     const content=[{type:'text',text:'DOCUMENT 1 — CURRENT PO (PO v1, the comparison authority):'},contentBlockFor(D.po),
       {type:'text',text:'DOCUMENT 2 — COC DRAFT (COC v1, audit subject):'},contentBlockFor(D.coc),
       {type:'text',text:'DOCUMENT 3 — PACK SLIP (PACK_SLIP v1, audit subject):'},contentBlockFor(D.packSlip)];
     if(D.traveler){content.push({type:'text',text:'DOCUMENT 4 — COMPLETED TRAVELER (TRAVELER v1, consistency reference for the pack slip; PO still governs):'},contentBlockFor(D.traveler));}
-    if(D.labels){ // evidence beats declaration — uploaded labels are ALWAYS verified
-      if(D.labels.name.toLowerCase().endsWith('.docx')){
-        content.push({type:'text',text:'DOCUMENT 5 — GENERATED LABELS (LABELS v1), extracted text (labels appear sequentially, one block per label):\n\n'+await docxToText(D.labels.b64)});
-      }else{content.push({type:'text',text:'DOCUMENT 5 — GENERATED LABELS (LABELS v1):'},contentBlockFor(D.labels));}
+    if(labelFiles.length){ // evidence beats declaration — every uploaded label file is ALWAYS verified
+      for(let i=0;i<labelFiles.length;i++){
+        const d=labelFiles[i],ref='DOCUMENT 5.'+(i+1)+' — GENERATED LABEL FILE '+(i+1)+' OF '+labelFiles.length;
+        if(d.name.toLowerCase().endsWith('.docx')){
+          content.push({type:'text',text:ref+', extracted text (labels appear sequentially, one block per label):\n\n'+await docxToText(d.b64)});
+        }else{content.push({type:'text',text:ref+':'},contentBlockFor(d));}
+      }
     }else{
       const la=S.labelAttest;
       content.push({type:'text',text:'DOCUMENT 5 — GENERATED LABELS: NONE PROVIDED. Labels were declared NOT REQUIRED for this WO (declaration recorded at '+(la.declaredAt||'SCR2')+' by '+la.by+' on '+(la.at||'').slice(0,10)+' — reason: '+la.reason+'). Do NOT raise findings about missing labels or label coverage: return labels as an empty array and labelCoverage with all four arrays empty, and leave the labels column of the traceability matrix blank. Run every other check (COC verbatim vs PO, pack slip vs traveler + PO, traceability across the available documents) exactly as normal.'});
@@ -1572,7 +1597,19 @@ window.fixWo=()=>{if(needRv())return;const v=($('#fix-wo').value||'').trim().toU
   (S.history=S.history||[]).push({at:new Date().toISOString(),stage:S.stage,by:RV.ini,what:'WO corrected: "'+String(old).slice(0,40)+'" → '+v});
   persistDraft();render();toast('✓ WO corrected — '+v+' ('+RV.ini+')')}
 function busyBox(){return BUSY.on?`<div class="busy" id="busy-box">⏳ <span id="busy-msg">${esc(BUSY.msg)}</span> — a few minutes; leave this tab open.</div>`:''}
+function labelDocCard(label,required,accept){const docs=labelDocs();const pend=PENDING.labels;const staged=Array.isArray(pend)?pend:pend?[pend]:[];
+  return `<div class="doc-card${docs.length?' doc-ok':required?' doc-missing':''}">
+    <span class="doc-type">${docs.length?'✓ ':''}${label}${required?'':' (optional)'}</span>
+    ${docs.length?`<span class="doc-meta">${docs.length} file${docs.length===1?'':'s'} attached</span>`
+      :`<span class="doc-meta">${required?'REQUIRED — not uploaded':'not uploaded'}</span>`}
+    ${docs.map((d,i)=>`<span class="doc-meta mono" style="display:flex;gap:6px;align-items:center;justify-content:space-between"><span>${esc(d.name)}</span>${S.stage!=='CLOSED'?`<button onclick="removeLabelDoc(${i})" title="Remove only this label file">Remove</button>`:''}</span>`).join('')}
+    ${staged.length?`<span class="doc-meta mono">staged: ${staged.map(f=>esc(f.name)).join(' · ')}</span>`:''}
+    ${S.stage!=='CLOSED'?(staged.length
+      ?`<span style="display:flex;gap:6px"><button class="primary" onclick="submitDoc('labels',this)">Add ${staged.length} label file${staged.length===1?'':'s'}</button><button onclick="cancelStage('labels')">Cancel</button></span>`
+      :`<input type="file" multiple accept="${accept}" onchange="stageDoc(this,'labels')"><span class="hint">Select one or more DOCX/PDF files (up to ${MAX_LABEL_FILES}). Later selections append; they do not replace files already listed.</span>`):''}
+  </div>`}
 function docCard(slot,label,required,accept){
+  if(slot==='labels')return labelDocCard(label,required,accept);
   const d=S.docs[slot];const pend=PENDING[slot];
   return `<div class="doc-card${d?' doc-ok':required?' doc-missing':''}">
     <span class="doc-type">${d?'✓ ':''}${label}${required?'':' (optional)'}</span>
@@ -1848,8 +1885,8 @@ function viewFI(){
   ${billingCard('Pricing &amp; billing — carried from SCR1 (price verification closes HERE)')}
   <div class="sec"><h3>COC + pack slip vs. PO</h3><span class="rule"></span></div>
   ${!done?`<div class="gatebox">
-    <button class="primary" ${KEY.v&&S.docs.po&&S.docs.coc&&S.docs.packSlip&&(S.docs.labels||labelsNotRequired())&&!BUSY.on?'':'disabled'}
-      title="${!KEY.v?'Activate the API key on the start screen':(!S.docs.coc||!S.docs.packSlip||(!S.docs.labels&&!labelsNotRequired()))?'Upload the COC draft, pack slip, and labels (or record the no-labels declaration above)':''}"
+    <button class="primary" ${KEY.v&&S.docs.po&&S.docs.coc&&S.docs.packSlip&&(labelDocs().length||labelsNotRequired())&&!BUSY.on?'':'disabled'}
+      title="${!KEY.v?'Activate the API key on the start screen':(!S.docs.coc||!S.docs.packSlip||(!labelDocs().length&&!labelsNotRequired()))?'Upload the COC draft, pack slip, and labels (or record the no-labels declaration above)':''}"
       onclick="runFi()">${r?'Re-run Final Inspection audit':'Run Final Inspection audit'}</button>
     <span class="hint">${KEY.v?'COC verbatim vs PO · pack slip vs traveler + PO · label verification (made at SCR2, checked here'+(labelsNotRequired()?' — declared not required for this WO':'')+') · traceability. 2–5 minutes. API cost only on Run — everything else is free.':'API key required — activate on the start screen.'}</span></div>`:''}
   ${r?`<p class="note" style="background:var(--navysoft);color:var(--ink);padding:10px 12px;border-radius:8px">${esc(r.summary)}</p>
