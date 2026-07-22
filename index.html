@@ -402,7 +402,7 @@ function freshInstance(){return {schema:'qpc.fscr.beta/v2',createdAt:new Date().
 // asserts the zip name matches BUILD.id). Rendered in the footer so the floor
 // can see which build a tab is running; stamped into every saved instance so
 // harvests carry build attribution.
-const BUILD={id:'r22',updated:'2026-07-21'};
+const BUILD={id:'r22b',updated:'2026-07-21'};
 addEventListener('DOMContentLoaded',()=>{const el=document.getElementById('build-stamp');
   if(el)el.textContent='FSCR Beta — build '+BUILD.id+' · updated '+BUILD.updated+' · if the floor announcement names a newer build, refresh this tab.'});
 const CHG={seq:0,saved:0,baseline:false};
@@ -1785,6 +1785,7 @@ window.exportFeedback=()=>{
     labelAttest:S.labelAttest||null,
     ledger:S.ledger.map(i=>({label:i.label,cls:i.cls,gate:i.gate,from:i.from,state:i.state||(i.res?'RESOLVED':'OPEN'),
       deferredTo:i.deferredTo||null,legacyUnaudited:!!i.legacyUnaudited,res:i.res,override:i.override||null,
+      parks:i.parks||[], // r22b: park flags belong in the feedback export (Tyler's r22 inspection note)
       notes:i.notes||[],audit:i.audit||[]}))};
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(fb,null,2)],{type:'application/json'}));
   a.download='fscr_feedback_'+(S.wo||S.po||'job')+'.json';a.click()};
