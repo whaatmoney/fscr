@@ -402,7 +402,7 @@ function freshInstance(){return {schema:'qpc.fscr.beta/v2',createdAt:new Date().
 // asserts the zip name matches BUILD.id). Rendered in the footer so the floor
 // can see which build a tab is running; stamped into every saved instance so
 // harvests carry build attribution.
-const BUILD={id:'r24c',updated:'2026-07-23'};
+const BUILD={id:'r25',updated:'2026-07-24'};
 addEventListener('DOMContentLoaded',()=>{const el=document.getElementById('build-stamp');
   if(el)el.textContent='FSCR Beta — build '+BUILD.id+' · updated '+BUILD.updated+' · if the floor announcement names a newer build, refresh this tab.'});
 const CHG={seq:0,saved:0,baseline:false};
@@ -587,12 +587,24 @@ function fbRow(f){const fb=S.fb&&S.fb[f.k];const nid='fbn-'+f.k.replace(/[^A-Za-
 
 // ---- API -----------------------------------------------------------------------
 // claude-opus-4-8 pricing (USD per MTok) — cost math only; NO keys or secrets are ever stored
-const MTOK_COST={inTok:5.00,outTok:25.00,cacheRead:0.50,cacheWrite:6.25};
-function calcCost(u){return Math.round(((u.inTok||0)*MTOK_COST.inTok+(u.outTok||0)*MTOK_COST.outTok
-  +(u.cacheRead||0)*MTOK_COST.cacheRead+(u.cacheWrite||0)*MTOK_COST.cacheWrite)/1e6*10000)/10000}
-async function callClaude(system,tool,content,label){
+// r25: $/MTok per model. Client-side cost figures are ESTIMATES AND WARNINGS
+// ONLY (Tyler 07-24) — enforceable spending limits live in the vendor console.
+const MODEL_MTOK={
+  'claude-opus-4-8':{inTok:5.00,outTok:25.00,cacheRead:0.50,cacheWrite:6.25},
+  'claude-sonnet-5':{inTok:3.00,outTok:15.00,cacheRead:0.30,cacheWrite:3.75}};
+const MTOK_COST=MODEL_MTOK['claude-opus-4-8'];
+function calcCostFor(u,model){const R=MODEL_MTOK[model]||MTOK_COST;
+  return Math.round(((u.inTok||0)*R.inTok+(u.outTok||0)*R.outTok
+  +(u.cacheRead||0)*R.cacheRead+(u.cacheWrite||0)*R.cacheWrite)/1e6*10000)/10000}
+function calcCost(u){return calcCostFor(u,'claude-opus-4-8')}
+async function callClaude(system,tool,content,label,opts){
+  // r25: opts={model,metricsOut} \u2014 model defaults to the primary; metricsOut
+  // (when given) receives this call's own metrics, immune to the shared
+  // callClaude.last race under concurrency. Neither call in a dual run ever
+  // receives the other's output, findings, confidence, or prompt chain.
+  const _model=(opts&&opts.model)||'claude-opus-4-8';
   BUSY.count=(BUSY.count||0)+1;BUSY.on=true;BUSY.msg=label+' \u2014 contacting API\u2026';render();
-  const _m={ms:0,inTok:0,outTok:0,cacheRead:0,cacheWrite:0,cost:0};const _t0=Date.now();
+  const _m={ms:0,inTok:0,outTok:0,cacheRead:0,cacheWrite:0,cost:0,model:_model};const _t0=Date.now();
   callClaude.last=null;
   try{
     let resp;
@@ -600,7 +612,7 @@ async function callClaude(system,tool,content,label){
       resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{
         'content-type':'application/json','x-api-key':KEY.v,'anthropic-version':'2023-06-01',
         'anthropic-dangerous-direct-browser-access':'true'},
-        body:JSON.stringify({model:'claude-opus-4-8',max_tokens:32000,stream:true,system,
+        body:JSON.stringify({model:_model,max_tokens:32000,stream:true,system,
           tools:[tool],tool_choice:{type:'tool',name:tool.name},messages:[{role:'user',content}]})});
       if(resp.ok)break;
       if((resp.status===429||resp.status===529||resp.status===503)&&attempt<3){
@@ -623,7 +635,8 @@ async function callClaude(system,tool,content,label){
           json+=ev.delta.partial_json;
           const el=$('#busy-msg');if(el)el.textContent=label+' \u2014 reading documents & auditing\u2026 ('+Math.round(json.length/1024)+' KB of findings so far)';}
         if(ev.type==='error')throw new Error((ev.error&&ev.error.message)||'stream error');}}
-    _m.ms=Date.now()-_t0;_m.cost=calcCost(_m);callClaude.last=_m;
+    _m.ms=Date.now()-_t0;_m.cost=calcCostFor(_m,_model);callClaude.last=_m;
+    if(opts&&opts.metricsOut)Object.assign(opts.metricsOut,_m);
     return JSON.parse(json||'{}');
   }finally{BUSY.count--;BUSY.on=BUSY.count>0;if(!BUSY.on)BUSY.msg='';}
 }
@@ -665,14 +678,19 @@ async function docxToText(b64){
 const FIELD_NORMALIZERS={shipTo:normalizeShipTo,shipMethod:normalizeShipMethod,
   processCallOut:normalizeCallout,specialInstructions:normalizeSpecialInstructions};
 // stage timing + API usage/cost, stored WITH the instance (ruling 07-14 item 7)
-function addStageMetrics(job,stage){const m=callClaude.last;if(!m||!job)return;
+// r25: metrics taken EXPLICITLY (never the shared callClaude.last in dual
+// runs — it races under concurrency). Each stage entry records the model that
+// ran it, so a saved instance identifies both pilot runs and their costs.
+function addRunMetrics(job,stage,m){if(!m||!job||m.ms==null)return;
   const sbr=(job.stageBuildRuns=job.stageBuildRuns||[]); // r19: one entry per ACTUAL stage run — reruns append, never overwrite
-  sbr.push({stage,buildId:BUILD.id,at:new Date().toISOString(),runNumber:sbr.filter(x=>x.stage===stage).length+1});
+  sbr.push({stage,buildId:BUILD.id,at:new Date().toISOString(),runNumber:sbr.filter(x=>x.stage===stage).length+1,model:m.model||''});
   job.metrics=job.metrics||{stages:{}};
   const s=job.metrics.stages[stage]=job.metrics.stages[stage]||{runs:0,ms:0,inTok:0,outTok:0,cacheRead:0,cacheWrite:0,cost:0};
   s.runs++;s.ms+=m.ms;s.inTok+=m.inTok;s.outTok+=m.outTok;s.cacheRead+=m.cacheRead;s.cacheWrite+=m.cacheWrite;
+  if(m.model)s.model=m.model;
   s.cost=Math.round((s.cost+m.cost)*10000)/10000;
   job.metrics.totalCost=Math.round(Object.values(job.metrics.stages).reduce((a,x)=>a+x.cost,0)*10000)/10000;}
+function addStageMetrics(job,stage){addRunMetrics(job,stage,callClaude.last)}
 function metricsLine(){const M=S&&S.metrics;if(!M)return '';
   const parts=Object.entries(M.stages).map(([k,s])=>k+' '+Math.round(s.ms/1000)+'s · $'+s.cost.toFixed(2)+(s.runs>1?' ('+s.runs+' runs)':''));
   return `<p class="hint" style="margin:2px 0">\u23f1 ${parts.join(' | ')} \u2014 job cost so far $${(M.totalCost||0).toFixed(2)}</p>`}
@@ -781,13 +799,102 @@ function buildJobFromRaw(raw,fname,b64){
         from:'SCR1',state:'OPEN',res:null,audit:[]});}}
   return job;
 }
+// ---- r25: SAME-VENDOR SHADOW PILOT (Tyler's 07-24 authorization) -----------
+// TBV at SCR1 only. Primary and shadow verifier analyze the SAME source
+// documents CONCURRENTLY and independently — neither receives the other's
+// output, confidence, findings, or prompt chain. Both settle before the SCR1
+// result renders. Reconciliation is deterministic code over canonical field
+// IDs + normalized values + source excerpts; anything code cannot compare is
+// UNRESOLVED. Shadow results NEVER block, create, or change a gate, and
+// never weaken a HOLD. Same-vendor agreement is NEVER "independently
+// verified" — it is SHADOW / MEASUREMENT ONLY.
+const PILOT={primary:'claude-opus-4-8',verifier:'claude-sonnet-5'};
+async function scr1Dual(content,label,call){ // `call` injectable so acceptance tests drive the REAL orchestration with fake models
+  call=call||callClaude;
+  const pm={},vm={};
+  const a=call(DATA.scr1.system,DATA.scr1.tool,content,label,{model:PILOT.primary,metricsOut:pm});
+  const b=call(DATA.scr1.system,DATA.scr1.tool,content,'Shadow verify — '+label,{model:PILOT.verifier,metricsOut:vm});
+  const r=await Promise.allSettled([a,b]); // wait for BOTH before anything renders
+  if(r[0].status==='rejected')throw r[0].reason; // primary failure = job failure (existing behavior)
+  return {raw:r[0].value,pm,vm,
+    verify:r[1].status==='fulfilled'?r[1].value:null,
+    verifyError:r[1].status==='rejected'?String((r[1].reason&&r[1].reason.message)||r[1].reason):null};
+}
+function shadowReconcile(rawP,rawV,job){
+  const sEq=(x,y)=>norm(String(x==null?'':x))===norm(String(y==null?'':y));
+  const fields=[];let agree=0,disagree=0,unresolved=0;
+  const cmp=(k,l,np,nv)=>{
+    if(!np||!nv){unresolved++;fields.push({k,l,status:'UNRESOLVED',
+      primary:np?String(np.value||''):null,verify:nv?String(nv.value||''):null,
+      reason:'canonical ID missing on the '+(np?'verifier':'primary')+' side'});return}
+    const pv=String(np.value||''),vv=String(nv.value||'');
+    const pe=String(np.sourceExcerpt||''),ve=String(nv.sourceExcerpt||'');
+    if(!sEq(pv,vv)){disagree++;fields.push({k,l,status:'DISAGREE',primary:pv,verify:vv,pExcerpt:pe,vExcerpt:ve});return}
+    if(!sEq(pe,ve)){unresolved++;fields.push({k,l,status:'UNRESOLVED',primary:pv,verify:vv,pExcerpt:pe,vExcerpt:ve,
+      reason:'values agree; source excerpts differ — provenance not reconciled'});return}
+    agree++;fields.push({k,l,status:'AGREE',primary:pv});};
+  for(const d of DATA.scr1.woDefs){if(d.entry)continue;
+    cmp(d.key,d.label,((rawP.wo||{})[d.key])||null,((rawV.wo||{})[d.key])||null);}
+  const lineNo=(li,ix)=>(typeof li.lineNo==='number')?li.lineNo:ix+1;
+  const pmap={},vmap={};
+  (rawP.lineItems||[]).forEach((li,ix)=>pmap[lineNo(li,ix)]=li);
+  (rawV.lineItems||[]).forEach((li,ix)=>vmap[lineNo(li,ix)]=li);
+  const nos=[...new Set([...Object.keys(pmap),...Object.keys(vmap)])].sort((x,y)=>x-y);
+  for(const n of nos){const P=pmap[n],V=vmap[n];
+    for(const d of DATA.scr1.lineDefs){if(d.entry)continue;
+      cmp('L'+n+'.'+d.key,'L'+n+' · '+d.label,
+        P?((((P.fields||{})[d.key]))||null):null,
+        V?((((V.fields||{})[d.key]))||null):null);}}
+  // Advisory findings carry NO canonical requirement IDs — only EXACT
+  // normalized-label pairs count as matched (deterministic); everything
+  // unpaired remains UNRESOLVED. No fuzzy matching, no third model.
+  const pi=(rawP.issues||[]).map(i=>String(i.label||''));
+  const vi=(rawV.issues||[]).map(i=>String(i.label||''));
+  const vleft=vi.slice();let labelMatches=0;const unresolvedPrimary=[];
+  for(const L of pi){const ix=vleft.findIndex(x=>sEq(x,L));
+    if(ix>=0){labelMatches++;vleft.splice(ix,1)}else unresolvedPrimary.push(L)}
+  return {pilot:'SAME-VENDOR SHADOW PILOT',status:'COMPLETED',
+    primaryModel:PILOT.primary,verifierModel:PILOT.verifier,
+    doc:{name:((job.docs||{}).po||{}).name||''},at:new Date().toISOString(),
+    counts:{agree,disagree,unresolved},fields,
+    issues:{primaryCount:pi.length,verifierCount:vi.length,labelMatches,
+      unresolvedPrimary,unresolvedVerify:vleft}};
+}
+function applyShadowLedger(job){const sh=job.shadow;if(!sh||sh.status!=='COMPLETED')return;
+  let n=0;
+  for(const f of (sh.fields||[])){if(f.status!=='DISAGREE')continue;n++;
+    job.ledger.push({id:'v1-'+n,shadow:true,from:'VERIFY',
+      label:'VERIFY — SHADOW DISAGREEMENT: '+f.l,cls:'ALERT',gate:'SCR',tier:3,
+      act:'Confirm this field against the PO. SHADOW / MEASUREMENT ONLY — same-vendor pilot; agreement or disagreement here is never independent verification.',
+      why:'Primary ('+sh.primaryModel+') read "'+f.primary+'"'+(f.pExcerpt?' ['+f.pExcerpt+']':'')+
+        ' · shadow verifier ('+sh.verifierModel+') read "'+f.verify+'"'+(f.vExcerpt?' ['+f.vExcerpt+']':'')+
+        '. Shadow items never block sign-off and never change a gate.',
+      fieldRefs:[f.k],state:'OPEN',res:null,audit:[]});}}
+function attachShadow(job,d){
+  addRunMetrics(job,'SCR1',d.pm);
+  const failed=!!d.verifyError||!d.verify||d.verify.status==='FAILED_INTAKE';
+  if(!failed){
+    addRunMetrics(job,'VERIFY',d.vm);
+    job.shadow=shadowReconcile(d.raw,d.verify,job);
+    applyShadowLedger(job);
+  }else{
+    if(d.verify)addRunMetrics(job,'VERIFY',d.vm); // an intake-failed verifier run still spent tokens
+    // Verifier failure is LOUD and nonblocking: the primary result stands,
+    // labeled unaudited — an unaudited result must never look audited.
+    job.shadow={pilot:'SAME-VENDOR SHADOW PILOT',status:'AUDIT NOT PERFORMED',
+      primaryModel:PILOT.primary,verifierModel:PILOT.verifier,
+      error:d.verifyError||'verifier intake failed',at:new Date().toISOString()};
+  }
+  return job;
+}
 async function extractJob(f){
   const b64=await fileB64(f);
-  const raw=await callClaude(DATA.scr1.system,DATA.scr1.tool,[contentBlockFor({name:f.name,b64}),
-    {type:'text',text:'Extract this purchase order ('+f.name+'). Read every page, including scanned pages. Return every field; explain any blank with a reason. Call emit_extraction exactly once.'}],
-    'SCR1: '+f.name);
-  if(raw.status==='FAILED_INTAKE')throw new Error('Failed intake: '+(raw.intakeError||'unreadable PDF'));
-  const job=buildJobFromRaw(raw,f.name,b64);addStageMetrics(job,'SCR1');return job;
+  const content=[contentBlockFor({name:f.name,b64}),
+    {type:'text',text:'Extract this purchase order ('+f.name+'). Read every page, including scanned pages. Return every field; explain any blank with a reason. Call emit_extraction exactly once.'}];
+  const d=await scr1Dual(content,'SCR1: '+f.name);
+  if(d.raw.status==='FAILED_INTAKE')throw new Error('Failed intake: '+(d.raw.intakeError||'unreadable PDF'));
+  const job=buildJobFromRaw(d.raw,f.name,b64);
+  return attachShadow(job,d);
 }
 // ---- batch (up to 30 POs; each becomes its own distributable instance) ----
 const BATCH={items:[],running:false,next:0};
@@ -1827,8 +1934,11 @@ function ledgerSection(showActions,triage){
   return (active.map(i=>ledgerCard(i,showActions)).join('')||'<p class="note" style="color:var(--ok)">✓ No open, deferred, or overridden items.</p>')
     +(resolved.length?`<details style="margin-top:6px"><summary class="hint">${resolved.length} resolved item${resolved.length===1?'':'s'} (documented outcomes travel with the job)</summary>${resolved.map(i=>ledgerCard(i,false)).join('')}</details>`:'')}
 function openBlocking(stage){const mx=STAGE_MAX[stage];
+  // r25: shadow-pilot items (i.shadow) live in the SAME ledger lifecycle but
+  // NEVER participate in gating — a verifier result must not block, create,
+  // or change a gate, or weaken any existing HOLD (Tyler 07-24).
   return S.ledger.filter(i=>{const st=i.state||(i.res?'RESOLVED':'OPEN');
-    return (st==='OPEN'||st==='DEFERRED')&&GATE_ORDER.indexOf(effGate(i))<=mx})}
+    return !i.shadow&&(st==='OPEN'||st==='DEFERRED')&&GATE_ORDER.indexOf(effGate(i))<=mx})}
 function distinct(ini,name){for(const s of S.signoffs){if(norm(s.ini)===norm(ini)||norm(s.name)===norm(name))return s.stage}return null}
 function needRv(){if(!RV.ini||!RV.name){alert('Set your name and initials at the top first.');return true}return false}
 
@@ -2066,6 +2176,25 @@ function viewLanding(){
     <button onclick="clearDraft();render()" style="margin-left:6px">Discard</button></div>`:''}`
 }
 
+// r25 shadow-pilot status panel. Wording rules (Tyler 07-24): always shows
+// SAME-VENDOR SHADOW PILOT; never the words "independently verified";
+// verifier failure renders VERIFY — AUDIT NOT PERFORMED, loudly.
+function shadowPanel(){const sh=S&&S.shadow;if(!sh)return '';
+  const M=(S.metrics&&S.metrics.stages)||{};
+  const pc=(M.SCR1&&M.SCR1.cost)||0,vc=(M.VERIFY&&M.VERIFY.cost)||0;
+  const head=`<b>SAME-VENDOR SHADOW PILOT</b> <span class="hint">— SHADOW / MEASUREMENT ONLY. Two Anthropic models agreeing is NOT independent verification.</span>`;
+  if(sh.status==='AUDIT NOT PERFORMED')
+    return `<div class="card" style="border-left:4px solid var(--warn)">${head}<br>
+      <b>VERIFY — AUDIT NOT PERFORMED</b> <span class="hint">— the shadow verifier (${esc(sh.verifierModel||'')}) failed: ${esc(sh.error||'unknown')}. The primary result below is UNAUDITED by the pilot. Nothing is blocked by this.</span></div>`;
+  const c=sh.counts||{agree:0,disagree:0,unresolved:0};
+  const iu=sh.issues?(sh.issues.unresolvedPrimary.length+sh.issues.unresolvedVerify.length):0;
+  return `<div class="card" style="border-left:4px solid var(--navy)">${head}<br>
+    <span class="mono" style="font-size:12px">primary ${esc(sh.primaryModel||'')} + verifier ${esc(sh.verifierModel||'')} read this PO independently and concurrently ·
+    fields: ${c.agree} agree · ${c.disagree} disagree → ledger · ${c.unresolved} unresolved ·
+    advisory labels: ${(sh.issues&&sh.issues.labelMatches)||0} exact match / ${iu} unresolved ·
+    cost: primary $${pc.toFixed(2)} + verifier $${vc.toFixed(2)} = $${(Math.round((pc+vc)*100)/100).toFixed(2)}</span>
+    ${c.unresolved?`<details style="margin-top:6px"><summary class="hint">${c.unresolved} unresolved comparison${c.unresolved===1?'':'s'} (values agree but provenance differs, or a canonical ID is missing on one side — code cannot compare, so it stays UNRESOLVED)</summary>
+      ${(sh.fields||[]).filter(f=>f.status==='UNRESOLVED').map(f=>`<div class="hint mono">${esc(f.k)} — ${esc(f.reason||'')}</div>`).join('')}</details>`:''}</div>`}
 function viewSCR1(){
   const copyable=f=>f.s==='EXTRACTED'||f.s==='NOT_APPLICABLE';
   const allV=S.scr1.fields.filter(copyable).every(f=>S.verified[f.k]);
@@ -2075,6 +2204,7 @@ function viewSCR1(){
   <h2>SCR1 — extract &amp; verify <span class="badge b-navy mono">PO ${esc(S.po)}</span></h2>
   <p class="note">${esc(S.customer)} · live extraction of <span class="mono">${esc(S.docs.po?.name||'')}</span>.
   Verify each value against the PO, copy into Access, resolve blocking issues, pass the gate. Rate anything the parser got wrong.</p>
+  ${shadowPanel()}
   ${idbar()}
   <div class="sec"><h3>Issues → ledger</h3><span class="rule"></span></div>
   ${S.ledger.filter(i=>i.from==='SCR1').map(i=>ledgerCard(i,!done)).join('')||'<p class="note">No issues raised.</p>'}
