@@ -402,7 +402,7 @@ function freshInstance(){return {schema:'qpc.fscr.beta/v2',createdAt:new Date().
 // asserts the zip name matches BUILD.id). Rendered in the footer so the floor
 // can see which build a tab is running; stamped into every saved instance so
 // harvests carry build attribution.
-const BUILD={id:'r23d',updated:'2026-07-21'};
+const BUILD={id:'r24c',updated:'2026-07-23'};
 addEventListener('DOMContentLoaded',()=>{const el=document.getElementById('build-stamp');
   if(el)el.textContent='FSCR Beta — build '+BUILD.id+' · updated '+BUILD.updated+' · if the floor announcement names a newer build, refresh this tab.'});
 const CHG={seq:0,saved:0,baseline:false};
@@ -499,7 +499,11 @@ window.loadFile=inp=>{const f=inp.files[0];if(!f)return;const r=new FileReader()
     S=o;persistDraft();CHG.saved=CHG.seq;CHG.baseline=true;render();
     if(wasV1){const reopened=(o.ledger||[]).filter(i=>(i.notes||[]).some(n=>n.by==='MIGRATION')).length;
       toast(reopened?('⚠ Instance migrated — '+reopened+' vague closure'+(reopened===1?'':'s')+' reopened as migrated notes'):'✓ Instance migrated to v2');}
-  }catch(e){alert('Could not load: '+e.message)}};r.readAsText(f)};
+  }catch(e){alert('Could not load: '+e.message)}};
+  // r24 (B3 slice): a FileReader failure previously surfaced NOTHING — the
+  // reviewer could believe the instance was loaded. Unknown must be visible.
+  r.onerror=()=>{alert('LOAD FAILED — could not read "'+f.name+'" (file unreadable). NOTHING was loaded.');inp.value=''};
+  r.readAsText(f)};
 
 // ---- catch-up: enter a mid-stream job at SCR2 or Final Inspection ---------------
 // The job started outside FSCR (SCR1 on paper / straight into Access). Prior
@@ -873,10 +877,27 @@ async function b2Restore(){try{const db=await b2Db();
   if(st&&st.items&&st.items.length){
     BATCH2.items=st.items.map(x=>({...x,status:x.status==='RUNNING'?'READY':x.status})); // a run interrupted by refresh re-queues; no partial ledger changes exist (identity gate applies after mapping)
     BATCH2.refused=st.refused||[];return true}}catch(e){}return false}
-window.b2Discard=async()=>{if(!confirm('Discard the whole batch? Unsaved per-job work in these rows is lost (export the ZIP first if needed).'))return;
-  BATCH2.items=[];BATCH2.refused=[];
+window.b2Discard=async()=>{
+  if(BATCH2.running){alert('The batch is RUNNING — wait for it to finish (or for the workers to error out) before discarding.');return}
+  if(!confirm('Discard the whole batch? Unsaved per-job work in these rows is lost (export the ZIP first if needed).'))return;
+  // r24c (Tyler's r24b blocker): IndexedDB deletion comes FIRST and must
+  // SUCCEED before anything is cleared — a swallowed failure previously
+  // reported success while the batch would reappear after restart (A5's
+  // persistence class). On failure: batch preserved, stay on the batch
+  // screen, fail visibly.
   try{const db=await b2Db();await new Promise((res,rej)=>{const tx=db.transaction('kv','readwrite');
-    tx.objectStore('kv').delete('state');tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});db.close()}catch(e){}
+    tx.objectStore('kv').delete('state');tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});db.close()}
+  catch(e){alert('DISCARD FAILED — batch preserved ('+((e&&e.message)||e)+'). Nothing was cleared; the batch is still here (and will still restore after a restart). Try again.');render();return}
+  // Deletion succeeded. Remove the fscr.beta.draft recovery path ONLY if that
+  // draft IS one of the discarded batch jobs (wo+po identity) — b2Open's
+  // persistDraft left it behind, and a surviving "Resume draft" card would
+  // contradict the confirmed discard. An unrelated standalone-job draft is
+  // never touched; an unparseable draft is left alone (ownership unknown).
+  try{const d=localStorage.getItem('fscr.beta.draft');
+    if(d){const o=JSON.parse(d);
+      if(o&&BATCH2.items.some(it=>it.job&&it.job.wo===o.wo&&it.job.po===o.po))clearDraft()}}catch(e){}
+  BATCH2.items=[];BATCH2.refused=[];
+  BATCH2.show=false; // r24b: a successful discard returns to the LANDING screen, not an empty batch view
   render()};
 window.b2LoadInstances=inp=>{let fs=[...inp.files];inp.value='';if(!fs.length)return;
   const room=B2_CAP-BATCH2.items.length;
@@ -931,7 +952,11 @@ window.b2Run=async()=>{if(!KEY.v){alert('Activate the API key first.');return}
   toast('Batch SCR2 — '+BATCH2.items.filter(i=>i.status==='DONE').length+' done · '+BATCH2.items.filter(i=>i.status==='ERROR').length+' error')};
 window.b2Open=wo=>{const it=BATCH2.items.find(x=>x.job&&x.job.wo===wo);if(!it)return;
   S=it.job;persistDraft();render()};
-window.b2Back=()=>{S=null;b2Persist();render()};
+// r24b (Tyler's r24 finding 1): the active job belongs to Batch SCR2 iff it
+// is one of the batch's own job objects (b2Open sets S by reference). Used by
+// every job view to render an explicit "← Batch SCR2" return control.
+function b2Has(j){return !!j&&BATCH2.items.some(it=>it.job===j)}
+window.b2Back=()=>{S=null;BATCH2.show=true;b2Persist();render()};
 // minimal STORE-mode ZIP (no deps) — §5.1b: ONE archive, never 15 downloads
 function crc32(u8){let c;const t=crc32.t||(crc32.t=(()=>{const t=new Uint32Array(256);
   for(let n=0;n<256;n++){c=n;for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);t[n]=c}return t})());
@@ -2009,7 +2034,10 @@ function viewLanding(){
     <span class="hint">Load up to ${B2_CAP} SCR2-stage instance files plus their travelers in bulk — matched by EXACT WO
     from the file names; anything unmatched, duplicate, or ambiguous is refused, never guessed. Audits run 2 at a time;
     one job's failure never stops the rest. Review, dispositions, and sign-off stay per job.</span><br><br>
-    <button onclick="BATCH2.show=true;render()">Open Batch SCR2 →</button></div>
+    ${BATCH2.items.length||BATCH2.refused.length
+      ?`<button class="primary" onclick="BATCH2.show=true;render()">Resume batch — ${BATCH2.items.length} job${BATCH2.items.length===1?'':'s'}${BATCH2.refused.length?' · '+BATCH2.refused.length+' refused':''} →</button>
+        <span class="hint" style="margin-left:8px">a pending batch was restored (it survives refresh/restart until discarded)</span>`
+      :`<button onclick="BATCH2.show=true;render()">Open Batch SCR2 →</button>`}</div>
   <div class="card"><b style="font-size:12px">Catch up a mid-stream job — enter at SCR2 or Final Inspection</b><br>
     <span class="hint">The job started outside FSCR (SCR1 done on paper / straight into Access) and there is no instance
     file. Enter its context — prior sign-offs are recorded as outside-FSCR, and reviewer independence is still enforced
@@ -2043,7 +2071,7 @@ function viewSCR1(){
   const allV=S.scr1.fields.filter(copyable).every(f=>S.verified[f.k]);
   const blocking=openBlocking('SCR1');
   const done=S.stage!=='SCR1';
-  return `${BATCH.items.length&&S?`<div style="margin:14px 0 -6px"><button onclick="backToBatch()">\u2190 Batch queue</button></div>`:''}${stagesBar()}${busyBox()}
+  return `${BATCH.items.length&&S?`<div style="margin:14px 0 -6px"><button onclick="backToBatch()">\u2190 Batch queue</button></div>`:''}${b2Has(S)?`<div style="margin:14px 0 -6px"><button onclick="b2Back()">\u2190 Batch SCR2</button></div>`:''}${stagesBar()}${busyBox()}
   <h2>SCR1 — extract &amp; verify <span class="badge b-navy mono">PO ${esc(S.po)}</span></h2>
   <p class="note">${esc(S.customer)} · live extraction of <span class="mono">${esc(S.docs.po?.name||'')}</span>.
   Verify each value against the PO, copy into Access, resolve blocking issues, pass the gate. Rate anything the parser got wrong.</p>
@@ -2106,7 +2134,7 @@ function viewSCR2(){
   const r=S.scr2Report;const done=S.stage==='FI'||S.stage==='CLOSED';
   const blocking=openBlocking('SCR2');
   const s1=S.signoffs.find(s=>s.stage==='SCR1');
-  return `${BATCH.items.length&&S?`<div style="margin:14px 0 -6px"><button onclick="backToBatch()">\u2190 Batch queue</button></div>`:''}${stagesBar()}${busyBox()}
+  return `${BATCH.items.length&&S?`<div style="margin:14px 0 -6px"><button onclick="backToBatch()">\u2190 Batch queue</button></div>`:''}${b2Has(S)?`<div style="margin:14px 0 -6px"><button onclick="b2Back()">\u2190 Batch SCR2</button></div>`:''}${stagesBar()}${busyBox()}
   <h2>SCR2 — audit traveler &amp; labels <span class="badge b-navy mono">${S.wo?'WO '+esc(S.wo):'PO '+esc(S.po)}</span></h2>
   <p class="note">${esc(S.customer)} · SCR1 signed off by <b>${esc(s1?.name||'?')} (${esc(s1?.ini||'?')})</b>${s1&&s1.outside?' <span class="hint">(outside FSCR — job caught up mid-stream)</span>':''}.
   The audit re-reads the PO — never SCR1's data — so an SCR1 error can't propagate. Labels are generated at this stage and verified at Final Inspection. You must be a different person (enforced at the gate).</p>
@@ -2129,9 +2157,9 @@ function viewSCR2(){
   <div class="sec"><h3>Audit vs. PO</h3><span class="rule"></span></div>
   ${!done?`<div class="gatebox">
     <button class="primary" ${KEY.v&&S.docs.po&&S.docs.traveler&&!BUSY.on?'':'disabled'}
-      title="${!KEY.v?'Activate the API key on the start screen (reload without saving? save instance first)':!S.docs.traveler?'Upload the completed traveler':''}"
+      title="${!KEY.v?'Activate the API key in the bar at the top of this screen':!S.docs.traveler?'Upload the completed traveler':''}"
       onclick="runScr2()">${r?'Re-run SCR2 audit':'Run SCR2 audit'}</button>
-    <span class="hint">${KEY.v?'The completed traveler vs the PO. Labels are generated at SCR2 and verified at Final Inspection. 2–4 minutes. API cost only on Run — everything else is free.':'API key required — activate on the start screen (load instance again after).'}</span></div>`:''}
+    <span class="hint">${KEY.v?'The completed traveler vs the PO. Labels are generated at SCR2 and verified at Final Inspection. 2–4 minutes. API cost only on Run — everything else is free.':'API key required — activate in the bar at the top of this screen.'}</span></div>`:''}
   ${r?`<p class="note" style="background:var(--navysoft);color:var(--ink);padding:10px 12px;border-radius:8px">${esc(r.summary)}</p>
    <h2 style="font-size:13px">Traveler vs. PO</h2>
    <div class="twrap"><table><tr><th>Field</th><th>PO (yardstick)</th><th>Traveler</th><th>Status + your rating</th></tr>
@@ -2180,7 +2208,7 @@ function viewFI(){
       <button class="primary" onclick="recordQtyCheck()">Record count</button></div></div>`);
   const allChecked=HUMAN.every(h=>S.checklist[h[0]]);
   const so=st=>S.signoffs.find(s=>s.stage===st);
-  return `${BATCH.items.length&&S?`<div style="margin:14px 0 -6px"><button onclick="backToBatch()">\u2190 Batch queue</button></div>`:''}${stagesBar()}${busyBox()}
+  return `${BATCH.items.length&&S?`<div style="margin:14px 0 -6px"><button onclick="backToBatch()">\u2190 Batch queue</button></div>`:''}${b2Has(S)?`<div style="margin:14px 0 -6px"><button onclick="b2Back()">\u2190 Batch SCR2</button></div>`:''}${stagesBar()}${busyBox()}
   <h2>Final Inspection <span class="badge b-navy mono">${S.wo?'WO '+esc(S.wo):'PO '+esc(S.po)}</span></h2>
   <p class="note">${esc(S.customer)} · SCR1: <b>${esc(so('SCR1')?.ini||'?')}</b> · SCR2: <b>${esc(so('SCR2')?.ini||'?')}</b>${(so('SCR1')?.outside||so('SCR2')?.outside)?' <span class="hint">(prior stages signed off outside FSCR — job caught up mid-stream)</span>':''}.
   You are the third set of eyes. Ledger first — nothing ships with an open, undocumented finding.</p>
@@ -2205,9 +2233,9 @@ function viewFI(){
   <div class="sec"><h3>COC + pack slip vs. PO</h3><span class="rule"></span></div>
   ${!done?`<div class="gatebox">
     <button class="primary" ${KEY.v&&S.docs.po&&S.docs.coc&&S.docs.packSlip&&(labelDocs().length||labelsNotRequired())&&!BUSY.on?'':'disabled'}
-      title="${!KEY.v?'Activate the API key on the start screen':(!S.docs.coc||!S.docs.packSlip||(!labelDocs().length&&!labelsNotRequired()))?'Upload the COC draft, pack slip, and labels (or record the no-labels declaration above)':''}"
+      title="${!KEY.v?'Activate the API key in the bar at the top of this screen':(!S.docs.coc||!S.docs.packSlip||(!labelDocs().length&&!labelsNotRequired()))?'Upload the COC draft, pack slip, and labels (or record the no-labels declaration above)':''}"
       onclick="runFi()">${r?'Re-run Final Inspection audit':'Run Final Inspection audit'}</button>
-    <span class="hint">${KEY.v?'COC verbatim vs PO · pack slip vs traveler + PO · label verification (made at SCR2, checked here'+(labelsNotRequired()?' — declared not required for this WO':'')+') · traceability. 2–5 minutes. API cost only on Run — everything else is free.':'API key required — activate on the start screen.'}</span></div>`:''}
+    <span class="hint">${KEY.v?'COC verbatim vs PO · pack slip vs traveler + PO · label verification (made at SCR2, checked here'+(labelsNotRequired()?' — declared not required for this WO':'')+') · traceability. 2–5 minutes. API cost only on Run — everything else is free.':'API key required — activate in the bar at the top of this screen.'}</span></div>`:''}
   ${r?`<p class="note" style="background:var(--navysoft);color:var(--ink);padding:10px 12px;border-radius:8px">${esc(r.summary)}</p>
    ${[['COC draft vs. PO','cocChecks','fi::coc::'],['Pack slip vs. traveler + PO','packSlipChecks','fi::packslip::']].map(([t,k,pfx])=>`
    <h2 style="font-size:13px">${t}</h2>
@@ -2266,7 +2294,7 @@ function viewBatch(){
   const n=BATCH.items.length;
   const c=s=>BATCH.items.filter(i=>i.status===s).length;
   const gated=BATCH.items.filter(i=>i.job&&i.job.stage!=='SCR1').length;
-  return `${BATCH.items.length&&S?`<div style="margin:14px 0 -6px"><button onclick="backToBatch()">\u2190 Batch queue</button></div>`:''}${stagesBar()}${busyBox()}
+  return `${BATCH.items.length&&S?`<div style="margin:14px 0 -6px"><button onclick="backToBatch()">\u2190 Batch queue</button></div>`:''}${b2Has(S)?`<div style="margin:14px 0 -6px"><button onclick="b2Back()">\u2190 Batch SCR2</button></div>`:''}${stagesBar()}${busyBox()}
   <h2>SCR1 batch \u2014 ${n} PO${n>1?'s':''}</h2>
   <p class="note">${BATCH.running?'Extracting 2 at a time \u2014 open finished POs while the rest run.':'Extraction finished.'}
    ${c('ready')} ready \u00b7 ${c('extracting')} extracting \u00b7 ${c('queued')} queued \u00b7 ${c('failed')} failed \u00b7 ${gated} signed off.
@@ -2296,15 +2324,34 @@ function viewBatch(){
       ${it.status==='failed'?`<button onclick="retryBatchItem(${ix})">Retry</button>`:''}
     </div>`}).join('')}`
 }
+// r24 (A2): the API key is activatable from EVERY screen, not only the start
+// screen — a reviewer mid-job (or in a pending batch) was previously locked
+// out of activation entirely. Semantics unchanged: tab memory only (KEY.v),
+// never saved into any file. The landing screen keeps its own key section.
+function keyBar(){
+  return `<div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px">
+    <b style="font-size:12px">API key</b>
+    ${KEY.v
+      ?`<span>🟢 active</span><button onclick="KEY.v=null;render()">Deactivate</button>
+        <span class="hint">tab memory only — never saved into files</span>`
+      :`<span>🔴 not active</span>
+        <input id="keybar-in" type="password" placeholder="sk-ant-…" style="width:240px">
+        <button class="primary" onclick="(function(){const k=$('#keybar-in').value.trim();
+          if(!/^sk-ant/.test(k)){alert('That does not look like an Anthropic API key.');return}KEY.v=k;render()})()">Activate</button>
+        <span class="hint">needed for Run/Extract — reading and feedback work without it</span>`}</div>`}
 function render(){
   updateTopbar();
   $('#who').textContent=S?`stage: ${S.stage}${S.wo?' · WO '+S.wo:''}${S.po?' · PO '+S.po:''}`:'';
   const m=$('#main');
-  if(!S){m.innerHTML=BATCH.items.length?viewBatch():((BATCH2.show||BATCH2.items.length||BATCH2.refused.length)?viewBatch2():viewLanding());return}
+  // r24 (A5): BATCH2.show is the ONLY batch-view authority. Items/refusals
+  // restored from IndexedDB no longer force-route here — they render as a
+  // visible Resume chip on the landing screen instead, so "← Start screen"
+  // always works and a restart always lands on a recoverable home state.
+  if(!S){m.innerHTML=BATCH.items.length?keyBar()+viewBatch():(BATCH2.show?keyBar()+viewBatch2():viewLanding());return}
   if(!KEY.v&&(S.stage==='SCR1'&&!S.scr1)){m.innerHTML=viewLanding();return}
-  if(S.stage==='SCR1')m.innerHTML=viewSCR1();
-  else if(S.stage==='SCR2')m.innerHTML=viewSCR2();
-  else m.innerHTML=viewFI();
+  if(S.stage==='SCR1')m.innerHTML=keyBar()+viewSCR1();
+  else if(S.stage==='SCR2')m.innerHTML=keyBar()+viewSCR2();
+  else m.innerHTML=keyBar()+viewFI();
   window.scrollTo({top:document.body.scrollHeight>0?window.scrollY:0});
 }
 window.fscrBeta={get state(){return S},set state(v){S=v;render()},get key(){return !!KEY.v},setKey(k){KEY.v=k;render()},RV};
