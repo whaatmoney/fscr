@@ -402,7 +402,7 @@ function freshInstance(){return {schema:'qpc.fscr.beta/v2',createdAt:new Date().
 // asserts the zip name matches BUILD.id). Rendered in the footer so the floor
 // can see which build a tab is running; stamped into every saved instance so
 // harvests carry build attribution.
-const BUILD={id:'r25',updated:'2026-07-24'};
+const BUILD={id:'r25d',updated:'2026-07-24'};
 addEventListener('DOMContentLoaded',()=>{const el=document.getElementById('build-stamp');
   if(el)el.textContent='FSCR Beta — build '+BUILD.id+' · updated '+BUILD.updated+' · if the floor announcement names a newer build, refresh this tab.'});
 const CHG={seq:0,saved:0,baseline:false};
@@ -603,6 +603,12 @@ async function callClaude(system,tool,content,label,opts){
   // callClaude.last race under concurrency. Neither call in a dual run ever
   // receives the other's output, findings, confidence, or prompt chain.
   const _model=(opts&&opts.model)||'claude-opus-4-8';
+  // r25b (audit finding 5): a REAL deadline. opts.timeoutMs arms an
+  // AbortController covering the entire call \u2014 connect, retries, and the
+  // stream read \u2014 so a hung verifier can never wedge the dual run. The
+  // primary keeps its existing no-timeout behavior unless a caller opts in.
+  const _ctl=(opts&&opts.timeoutMs)?new AbortController():null;
+  const _kill=_ctl?setTimeout(()=>_ctl.abort(),opts.timeoutMs):null;
   BUSY.count=(BUSY.count||0)+1;BUSY.on=true;BUSY.msg=label+' \u2014 contacting API\u2026';render();
   const _m={ms:0,inTok:0,outTok:0,cacheRead:0,cacheWrite:0,cost:0,model:_model};const _t0=Date.now();
   callClaude.last=null;
@@ -612,13 +618,22 @@ async function callClaude(system,tool,content,label,opts){
       resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{
         'content-type':'application/json','x-api-key':KEY.v,'anthropic-version':'2023-06-01',
         'anthropic-dangerous-direct-browser-access':'true'},
+        signal:_ctl?_ctl.signal:undefined,
         body:JSON.stringify({model:_model,max_tokens:32000,stream:true,system,
           tools:[tool],tool_choice:{type:'tool',name:tool.name},messages:[{role:'user',content}]})});
       if(resp.ok)break;
       if((resp.status===429||resp.status===529||resp.status===503)&&attempt<3){
         const wait=20*(attempt+1);
         const el=$('#busy-msg');if(el)el.textContent=label+' \u2014 rate limited, retrying in '+wait+'s\u2026';
-        await new Promise(r=>setTimeout(r,wait*1000));continue;
+        // r25c (audit correction): the backoff sleep RACES the abort signal \u2014
+        // a deadline landing mid-backoff fires immediately instead of waiting
+        // out the 20/40/60 s delay. The documented deadline is now hard.
+        await new Promise((res,rej)=>{const t=setTimeout(res,wait*1000);
+          if(_ctl)_ctl.signal.addEventListener('abort',()=>{clearTimeout(t);
+            rej(Object.assign(new Error('aborted'),{name:'AbortError'}))},{once:true});
+          if(_ctl&&_ctl.signal.aborted){clearTimeout(t);
+            rej(Object.assign(new Error('aborted'),{name:'AbortError'}))}});
+        continue;
       }
       const e=await resp.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||('API error HTTP '+resp.status));
     }
@@ -638,7 +653,10 @@ async function callClaude(system,tool,content,label,opts){
     _m.ms=Date.now()-_t0;_m.cost=calcCostFor(_m,_model);callClaude.last=_m;
     if(opts&&opts.metricsOut)Object.assign(opts.metricsOut,_m);
     return JSON.parse(json||'{}');
-  }finally{BUSY.count--;BUSY.on=BUSY.count>0;if(!BUSY.on)BUSY.msg='';}
+  }catch(e){
+    if(_ctl&&_ctl.signal.aborted)throw new Error('timeout after '+Math.round(opts.timeoutMs/1000)+'s — the call was aborted');
+    throw e;
+  }finally{if(_kill)clearTimeout(_kill);BUSY.count--;BUSY.on=BUSY.count>0;if(!BUSY.on)BUSY.msg='';}
 }
 const fileB64=f=>new Promise((res,rej)=>{const r=new FileReader();
   r.onload=()=>res(String(r.result).slice(String(r.result).indexOf(',')+1));r.onerror=()=>rej(r.error);r.readAsDataURL(f)});
@@ -808,20 +826,93 @@ function buildJobFromRaw(raw,fname,b64){
 // UNRESOLVED. Shadow results NEVER block, create, or change a gate, and
 // never weaken a HOLD. Same-vendor agreement is NEVER "independently
 // verified" — it is SHADOW / MEASUREMENT ONLY.
-const PILOT={primary:'claude-opus-4-8',verifier:'claude-sonnet-5'};
+const PILOT={primary:'claude-opus-4-8',verifier:'claude-sonnet-5',
+  verifierTimeoutMs:240000}; // r25b: hard verifier deadline (4 min) — a hung verifier degrades to AUDIT NOT PERFORMED, never a wedged SCR1
 async function scr1Dual(content,label,call){ // `call` injectable so acceptance tests drive the REAL orchestration with fake models
   call=call||callClaude;
   const pm={},vm={};
   const a=call(DATA.scr1.system,DATA.scr1.tool,content,label,{model:PILOT.primary,metricsOut:pm});
-  const b=call(DATA.scr1.system,DATA.scr1.tool,content,'Shadow verify — '+label,{model:PILOT.verifier,metricsOut:vm});
+  const b=call(DATA.scr1.system,DATA.scr1.tool,content,'Shadow verify — '+label,{model:PILOT.verifier,metricsOut:vm,timeoutMs:PILOT.verifierTimeoutMs});
   const r=await Promise.allSettled([a,b]); // wait for BOTH before anything renders
   if(r[0].status==='rejected')throw r[0].reason; // primary failure = job failure (existing behavior)
   return {raw:r[0].value,pm,vm,
     verify:r[1].status==='fulfilled'?r[1].value:null,
     verifyError:r[1].status==='rejected'?String((r[1].reason&&r[1].reason.message)||r[1].reason):null};
 }
+// r25b (audit finding 1): FIELD-AWARE value comparison that preserves numeric
+// SCALE, dates, quantities, revisions, and identifier boundaries. norm() strips
+// punctuation and would equate $1.00 with $100 — never acceptable for
+// reconciliation. shadowTok tokenizes into NUMBER tokens (parseFloat — '1.00'
+// and '1' equal, '1.00' and '100' differ), canonical M/D/YYYY dates
+// (2-digit years → 2000+yy), and letter tokens with boundaries preserved.
+// Conservative direction: anything not provably equal DISAGREES or stays
+// UNRESOLVED — false alarms are visible noise; false agreements are silent.
+// r25c (audit blocker 1): the comparator is FIELD-KIND-AWARE. One tokenizer
+// for everything falsely equated -1.00/1.00, ($1.00)/$1.00, $1.00/€1.00, and
+// 00123/123. Kinds:
+//   'money' (currentPrice) — sign preserved (leading minus AND accounting
+//     parentheses), currency preserved when both sides state one, numeric
+//     value compared at scale, thousands separators tolerated.
+//   'qty' (qty) — sign + numeric scale + unit words; no currency.
+//   'text' (everything else: identifiers, part numbers, POs, callouts,
+//     excerpts, labels) — digit runs compared RAW (leading zeros and exact
+//     digits preserved: 00123 ≠ 123, PN 00123 ≠ PN 123); letter-token
+//     boundaries preserved; only full m/d/y date patterns canonicalized
+//     (7/24/26 = 07/24/2026).
+// Conservative direction unchanged: not provably equal → DISAGREE/UNRESOLVED.
+// r25d (audit blocker 1): FIVE kinds. Date canonicalization applies ONLY to
+// actual date fields; identifiers keep punctuation as MEANING (PN 7-24-26 is
+// a part number, not a date; AB-12 ≠ AB/12); free text keeps raw digit runs
+// and letter boundaries with no date rewriting.
+function shadowKind(k){const base=String(k||'').replace(/^L\d+\./,'');
+  if(base==='currentPrice')return 'money';
+  if(base==='qty')return 'qty';
+  if(base==='customerNeedBy'||base==='receivedDate')return 'date';
+  if(base==='purchaseOrder'||base==='partNumber'||base==='partId')return 'identifier';
+  return 'freeText'}
+function shadowTokFree(s){ // free text: raw digit runs + letter tokens; NO date canon
+  const t=String(s==null?'':s).toUpperCase();
+  const toks=[];const re=/\d+|[A-Z]+/g;let m;
+  while((m=re.exec(t)))toks.push(m[0]);
+  return toks.join('|')}
+function shadowTokDate(s){ // date fields ONLY: canonical M/D/YYYY, then tokens
+  let t=String(s==null?'':s).toUpperCase();
+  t=t.replace(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\b/g,(m,a,b,c)=>{
+    const y=c.length<=2?String(2000+parseInt(c,10)):c;
+    return String(parseInt(a,10))+'/'+String(parseInt(b,10))+'/'+y});
+  return shadowTokFree(t)}
+function shadowIdCanon(s){ // identifiers: punctuation is meaningful — uppercase + whitespace collapse ONLY
+  return String(s==null?'':s).toUpperCase().replace(/\s+/g,' ').trim()}
+const shadowTokText=shadowTokFree; // legacy alias (excerpts/labels = free text)
+function shadowNumParse(s){
+  let t=String(s==null?'':s).toUpperCase();
+  let neg=/\(.*\d.*\)/.test(t); // accounting parentheses = negative
+  t=t.replace(/[()]/g,'');
+  const cur=(t.match(/[$€£¥]|\b(USD|EUR|GBP|CAD|JPY)\b/g)||[]).join('');
+  t=t.replace(/\b(USD|EUR|GBP|CAD|JPY)\b/g,' ');
+  t=t.replace(/[$€£¥]/g,''); // symbol out AFTER capture, so '-$1.00' keeps its minus
+  t=t.replace(/(\d),(?=\d{3}\b)/g,'$1');
+  const toks=[];const re=/-?\d+(?:\.\d+)?|[A-Z]+/g;let m;
+  while((m=re.exec(t))){const x=m[0];
+    if(/\d/.test(x)){let v=parseFloat(x);if(neg){v=-Math.abs(v);neg=false}toks.push('#'+v)}
+    else toks.push(x)}
+  return {cur,body:toks.join('|')}}
+function shadowValEq(a,b,kind){
+  kind=kind||'freeText';
+  if(kind==='money'){const A=shadowNumParse(a),B=shadowNumParse(b);
+    if(A.cur&&B.cur&&A.cur!==B.cur)return false; // both state a currency → must match
+    return A.body===B.body}
+  if(kind==='qty'){return shadowNumParse(a).body===shadowNumParse(b).body}
+  if(kind==='date'){return shadowTokDate(a)===shadowTokDate(b)}
+  if(kind==='identifier'){return shadowIdCanon(a)===shadowIdCanon(b)}
+  return shadowTokFree(a)===shadowTokFree(b)}
+// Canonical string for fingerprints — strict per kind.
+function shadowCanon(k,v){const kind=shadowKind(k);
+  if(kind==='money'||kind==='qty'){const P=shadowNumParse(v);return 'C:'+P.cur+'|'+P.body}
+  if(kind==='date')return 'DT:'+shadowTokDate(v);
+  if(kind==='identifier')return 'ID:'+shadowIdCanon(v);
+  return shadowTokFree(v)}
 function shadowReconcile(rawP,rawV,job){
-  const sEq=(x,y)=>norm(String(x==null?'':x))===norm(String(y==null?'':y));
   const fields=[];let agree=0,disagree=0,unresolved=0;
   const cmp=(k,l,np,nv)=>{
     if(!np||!nv){unresolved++;fields.push({k,l,status:'UNRESOLVED',
@@ -829,8 +920,17 @@ function shadowReconcile(rawP,rawV,job){
       reason:'canonical ID missing on the '+(np?'verifier':'primary')+' side'});return}
     const pv=String(np.value||''),vv=String(nv.value||'');
     const pe=String(np.sourceExcerpt||''),ve=String(nv.sourceExcerpt||'');
-    if(!sEq(pv,vv)){disagree++;fields.push({k,l,status:'DISAGREE',primary:pv,verify:vv,pExcerpt:pe,vExcerpt:ve});return}
-    if(!sEq(pe,ve)){unresolved++;fields.push({k,l,status:'UNRESOLVED',primary:pv,verify:vv,pExcerpt:pe,vExcerpt:ve,
+    const ps=String(np.status||''),vs=String(nv.status||'');
+    const pp=String(np.sourcePage||''),vp=String(nv.sourcePage||'');
+    if(!shadowValEq(pv,vv,shadowKind(k))){disagree++;fields.push({k,l,status:'DISAGREE',
+      primary:pv,verify:vv,pExcerpt:pe,vExcerpt:ve,pStatus:ps,vStatus:vs});return}
+    // r25b (audit finding 2): equal values are NOT agreement if the models
+    // disagree on field STATUS or on WHERE the value came from.
+    if(ps!==vs){unresolved++;fields.push({k,l,status:'UNRESOLVED',primary:pv,verify:vv,
+      reason:'values match but field status differs: '+(ps||'(none)')+' vs '+(vs||'(none)')});return}
+    if(!shadowValEq(pp,vp)){unresolved++;fields.push({k,l,status:'UNRESOLVED',primary:pv,verify:vv,
+      reason:'values match but source pages differ: p.'+(pp||'?')+' vs p.'+(vp||'?')});return}
+    if(!shadowValEq(pe,ve)){unresolved++;fields.push({k,l,status:'UNRESOLVED',primary:pv,verify:vv,pExcerpt:pe,vExcerpt:ve,
       reason:'values agree; source excerpts differ — provenance not reconciled'});return}
     agree++;fields.push({k,l,status:'AGREE',primary:pv});};
   for(const d of DATA.scr1.woDefs){if(d.entry)continue;
@@ -846,30 +946,94 @@ function shadowReconcile(rawP,rawV,job){
         P?((((P.fields||{})[d.key]))||null):null,
         V?((((V.fields||{})[d.key]))||null):null);}}
   // Advisory findings carry NO canonical requirement IDs — only EXACT
-  // normalized-label pairs count as matched (deterministic); everything
+  // token-normalized label pairs count as matched (deterministic); everything
   // unpaired remains UNRESOLVED. No fuzzy matching, no third model.
+  // r25b (audit finding 3): verifier-only findings keep their FULL issue
+  // objects so applyShadowLedger can present them for review — a requirement
+  // the verifier caught and the primary missed must be visible and
+  // adjudicable, never a silent count.
   const pi=(rawP.issues||[]).map(i=>String(i.label||''));
-  const vi=(rawV.issues||[]).map(i=>String(i.label||''));
-  const vleft=vi.slice();let labelMatches=0;const unresolvedPrimary=[];
-  for(const L of pi){const ix=vleft.findIndex(x=>sEq(x,L));
+  const viFull=(rawV.issues||[]).slice();
+  const vleft=viFull.slice();let labelMatches=0;const unresolvedPrimary=[];
+  for(const L of pi){const ix=vleft.findIndex(x=>shadowValEq(String(x.label||''),L));
     if(ix>=0){labelMatches++;vleft.splice(ix,1)}else unresolvedPrimary.push(L)}
   return {pilot:'SAME-VENDOR SHADOW PILOT',status:'COMPLETED',
     primaryModel:PILOT.primary,verifierModel:PILOT.verifier,
     doc:{name:((job.docs||{}).po||{}).name||''},at:new Date().toISOString(),
     counts:{agree,disagree,unresolved},fields,
-    issues:{primaryCount:pi.length,verifierCount:vi.length,labelMatches,
-      unresolvedPrimary,unresolvedVerify:vleft}};
+    issues:{primaryCount:pi.length,verifierCount:viFull.length,labelMatches,
+      unresolvedPrimary,
+      unresolvedVerify:vleft.map(i=>String(i.label||'')),
+      verifierOnly:vleft.map(i=>({label:String(i.label||''),cls:i.class==='HOLD'?'HOLD':'ALERT',
+        gate:String(i.gate||''),tier:i.tier||3,poStates:String(i.poStates||''),
+        why:String(i.why||''),act:String(i.action||'')}))}};
 }
 function applyShadowLedger(job){const sh=job.shadow;if(!sh||sh.status!=='COMPLETED')return;
-  let n=0;
-  for(const f of (sh.fields||[])){if(f.status!=='DISAGREE')continue;n++;
-    job.ledger.push({id:'v1-'+n,shadow:true,from:'VERIFY',
+  // r25b (audit finding 6): idempotent across reruns — IDs continue from the
+  // highest existing v1-N (never restart at v1-1), and an exact rerun never
+  // duplicates an existing shadow item (fingerprint dedupe, the same rule as
+  // price refs). Resolved items are never touched or deleted.
+  const existing=job.ledger.filter(i=>i.shadow);
+  // r25c (audit blocker 2): r25-era shadow items carry no fingerprint —
+  // reconstruct one CONSERVATIVELY from the item's own recorded readings
+  // (the r25/r25b why format quotes both: `read "X" … read "Y"`) so an
+  // identical rerun after an upgrade can never duplicate them. If the
+  // readings cannot be parsed, fall back to field-level identity — the
+  // conservative direction is AGAINST duplication.
+  for(const i of existing){if(i.sfp)continue;
+    const lbl=String(i.label||'');
+    if(/^VERIFY — SHADOW DISAGREEMENT/.test(lbl)){
+      const k=(i.fieldRefs&&i.fieldRefs[0])||'';
+      // r25d (audit blocker 2): items that carry STRUCTURED readings (i.sp,
+      // written from r25d on) never parse prose. Older prose parses against
+      // the why-format's FIXED delimiters (' · shadow verifier (' and
+      // '. Shadow items never'), so readings containing quotes — REV "F" —
+      // reconstruct intact instead of truncating at the first quote.
+      const sp=i.sp&&i.sp.primary!=null?i.sp:null;
+      const m=sp?null:/read "([\s\S]*?)"(?: \[[\s\S]*?\])? · shadow verifier \([^)]*\) read "([\s\S]*?)"(?: \[[\s\S]*?\])?\. Shadow items never/.exec(String(i.why||''));
+      if(sp)i.sfp='D|'+k+'|'+shadowCanon(k,sp.primary)+'|'+shadowCanon(k,sp.verify);
+      else if(m)i.sfp='D|'+k+'|'+shadowCanon(k,m[1])+'|'+shadowCanon(k,m[2]);
+      else i.sfp='D|'+k+'|UNPARSED|'+String(i.id||''); // unique — NEVER suppresses (blocker 3)
+    }else if(/^VERIFY — SHADOW-ONLY FINDING: /.test(lbl)){
+      const sp=i.sp&&i.sp.label!=null?i.sp:null;
+      i.sfp=sp?('V|'+shadowTokFree(sp.label)+'|'+shadowTokFree(sp.evidence||'')):
+        ('V|UNPARSED|'+String(i.id||'')); // unique — never suppresses
+    }else i.sfp='L|'+shadowTokFree(lbl);}
+  let n=existing.reduce((a,i)=>{const m=/^v1-(\d+)$/.exec(String(i.id||''));
+    return m?Math.max(a,parseInt(m[1],10)):a},0);
+  const seen=new Set(existing.map(i=>String(i.sfp||'')));
+  // r25d (audit blocker 3): dedupe is EXACT-fingerprint only. An unparseable
+  // legacy item can produce a visible duplicate on an identical rerun —
+  // Tyler's ruling: a visible duplicate is acceptable; silently suppressing a
+  // potentially NEW finding is not. No field-level fallback suppression.
+  const push=(it,fp)=>{if(fp&&seen.has(fp))return;
+    seen.add(fp);n++;it.id='v1-'+n;it.sfp=fp;job.ledger.push(it)};
+  for(const f of (sh.fields||[])){if(f.status!=='DISAGREE')continue;
+    push({shadow:true,from:'VERIFY',
       label:'VERIFY — SHADOW DISAGREEMENT: '+f.l,cls:'ALERT',gate:'SCR',tier:3,
       act:'Confirm this field against the PO. SHADOW / MEASUREMENT ONLY — same-vendor pilot; agreement or disagreement here is never independent verification.',
       why:'Primary ('+sh.primaryModel+') read "'+f.primary+'"'+(f.pExcerpt?' ['+f.pExcerpt+']':'')+
         ' · shadow verifier ('+sh.verifierModel+') read "'+f.verify+'"'+(f.vExcerpt?' ['+f.vExcerpt+']':'')+
         '. Shadow items never block sign-off and never change a gate.',
-      fieldRefs:[f.k],state:'OPEN',res:null,audit:[]});}}
+      fieldRefs:[f.k],state:'OPEN',res:null,audit:[],
+      sp:{primary:String(f.primary==null?'':f.primary),verify:String(f.verify==null?'':f.verify),
+        pExcerpt:String(f.pExcerpt||''),vExcerpt:String(f.vExcerpt||'')}}, // r25d: structured readings — future migrations never parse prose
+      'D|'+f.k+'|'+shadowCanon(f.k,f.primary)+'|'+shadowCanon(f.k,f.verify));}
+  // r25b (audit finding 3): a finding the VERIFIER caught and the primary
+  // missed is presented for review as its own adjudicable shadow item —
+  // never a silent count. Stays ALERT regardless of the verifier's class
+  // (a shadow item may never introduce or strengthen a gate); the
+  // verifier's own classification is preserved in the text.
+  for(const vi of ((sh.issues&&sh.issues.verifierOnly)||[])){
+    push({shadow:true,from:'VERIFY',
+      label:'VERIFY — SHADOW-ONLY FINDING: '+vi.label,cls:'ALERT',gate:'SCR',tier:3,
+      act:'Review whether the primary extraction missed a real requirement. SHADOW / MEASUREMENT ONLY — same-vendor pilot; never independent verification, never blocking.',
+      why:'The shadow verifier ('+sh.verifierModel+') raised this finding; the primary ('+sh.primaryModel+') did not. Verifier said'+
+        (vi.poStates?' — PO states: "'+vi.poStates+'"':'')+(vi.why?' — why: '+vi.why:'')+(vi.act?' — action: '+vi.act:'')+
+        '. Verifier classed it '+vi.cls+'·'+(vi.gate||'?')+' (shadow items render ALERT and never gate).',
+      fieldRefs:[],state:'OPEN',res:null,audit:[],
+      sp:{label:vi.label,evidence:String(vi.poStates||vi.why||'')}}, // r25d: structured — never parse prose again
+      'V|'+shadowTokFree(vi.label)+'|'+shadowTokFree(vi.poStates||vi.why));}}
 function attachShadow(job,d){
   addRunMetrics(job,'SCR1',d.pm);
   const failed=!!d.verifyError||!d.verify||d.verify.status==='FAILED_INTAKE';
@@ -1923,10 +2087,15 @@ function ledgerSection(showActions,triage){
   const st=i=>i.state||(i.res?'RESOLVED':'OPEN');
   const resolved=S.ledger.filter(i=>st(i)==='RESOLVED');
   if(triage){ // FI triage (ruling 2026-07-16): action-required first, carry-alongs separated
-    const act=S.ledger.filter(i=>st(i)==='OPEN'||st(i)==='DEFERRED');
+    // r25b (audit finding 7): shadow-pilot items are NEVER "must be actioned
+    // to close" — they are nonblocking measurement items and render in their
+    // own clearly-labeled section, outside the mandatory count.
+    const act=S.ledger.filter(i=>!i.shadow&&(st(i)==='OPEN'||st(i)==='DEFERRED'));
+    const shOpen=S.ledger.filter(i=>i.shadow&&(st(i)==='OPEN'||st(i)==='DEFERRED'));
     const ovr=S.ledger.filter(i=>st(i)==='OVERRIDDEN');
-    return `<p class="note"><b style="color:${act.length?'var(--bad)':'var(--ok)'}">${act.length?'⚠ '+act.length+' item'+(act.length===1?'':'s')+' MUST be actioned to close':'✓ Nothing left to action'}</b>${ovr.length?' · '+ovr.length+' overridden (travels for follow-up)':''}${resolved.length?' · '+resolved.length+' resolved (reference)':''}</p>`
+    return `<p class="note"><b style="color:${act.length?'var(--bad)':'var(--ok)'}">${act.length?'⚠ '+act.length+' item'+(act.length===1?'':'s')+' MUST be actioned to close':'✓ Nothing left to action'}</b>${ovr.length?' · '+ovr.length+' overridden (travels for follow-up)':''}${shOpen.length?' · '+shOpen.length+' shadow-pilot (measurement only — never required)':''}${resolved.length?' · '+resolved.length+' resolved (reference)':''}</p>`
       +act.map(i=>ledgerCard(i,showActions)).join('')
+      +(shOpen.length?`<details style="margin-top:6px"><summary class="hint">SHADOW PILOT — MEASUREMENT ONLY (${shOpen.length}) — reviewing feeds the pilot; never required to close</summary>${shOpen.map(i=>ledgerCard(i,showActions)).join('')}</details>`:'')
       +(ovr.length?`<details style="margin-top:6px" open><summary class="hint">OVERRIDDEN — shipment permitted, verification outstanding (${ovr.length})</summary>${ovr.map(i=>ledgerCard(i,showActions)).join('')}</details>`:'')
       +(resolved.length?`<details style="margin-top:6px"><summary class="hint">${resolved.length} resolved item${resolved.length===1?'':'s'} — reference only (documented outcomes travel with the job)</summary>${resolved.map(i=>ledgerCard(i,false)).join('')}</details>`:'');
   }
@@ -2129,7 +2298,8 @@ function viewLanding(){
   <div class="sec"><h3>3 · Start or continue</h3><span class="rule"></span></div>
   <div class="card"><b style="font-size:12px">New job(s) \u2014 SCR1</b><br>
     <span class="hint">Choose 1\u201330 customer PO PDFs, then hit Extract. Each PO becomes its own job \u2014 and its own
-    instance file to distribute. Live extraction runs 2 at a time (\u22481\u20132 min per PO). API cost is charged ONLY when an Extract/Run button calls the model \u2014 verifying, feedback, notes, and saving are free.</span><br><br>
+    instance file to distribute. Live extraction runs 2 at a time (\u22481\u20132 min per PO). API cost is charged ONLY when an Extract/Run button calls the model \u2014 verifying, feedback, notes, and saving are free.
+    <b>SHADOW PILOT:</b> each SCR1 extraction now makes TWO model calls (primary + shadow verifier) and incurs BOTH costs \u2014 shown separately and combined on the job screen. Results render after both finish.</span><br><br>
     ${PENDING.newPo
       ?`<span class="doc-meta mono">staged: ${PENDING.newPo.length} PO${PENDING.newPo.length>1?'s':''}
          ${PENDING.newPo.length<=5?'\u2014 '+PENDING.newPo.map(f=>esc(f.name)).join(', '):''}</span><br><br>
@@ -2193,8 +2363,10 @@ function shadowPanel(){const sh=S&&S.shadow;if(!sh)return '';
     fields: ${c.agree} agree · ${c.disagree} disagree → ledger · ${c.unresolved} unresolved ·
     advisory labels: ${(sh.issues&&sh.issues.labelMatches)||0} exact match / ${iu} unresolved ·
     cost: primary $${pc.toFixed(2)} + verifier $${vc.toFixed(2)} = $${(Math.round((pc+vc)*100)/100).toFixed(2)}</span>
-    ${c.unresolved?`<details style="margin-top:6px"><summary class="hint">${c.unresolved} unresolved comparison${c.unresolved===1?'':'s'} (values agree but provenance differs, or a canonical ID is missing on one side — code cannot compare, so it stays UNRESOLVED)</summary>
-      ${(sh.fields||[]).filter(f=>f.status==='UNRESOLVED').map(f=>`<div class="hint mono">${esc(f.k)} — ${esc(f.reason||'')}</div>`).join('')}</details>`:''}</div>`}
+    ${c.disagree?`<details style="margin-top:6px" open><summary class="hint" style="color:var(--bad)">${c.disagree} disagreement${c.disagree===1?'':'s'} — both readings and excerpts (also in the ledger below)</summary>
+      ${(sh.fields||[]).filter(f=>f.status==='DISAGREE').map(f=>`<div class="hint mono" style="margin:3px 0">${esc(f.k)}: primary "${esc(f.primary||'')}"${f.pExcerpt?' ['+esc(f.pExcerpt)+']':''} · verifier "${esc(f.verify||'')}"${f.vExcerpt?' ['+esc(f.vExcerpt)+']':''}</div>`).join('')}</details>`:''}
+    ${c.unresolved?`<details style="margin-top:6px"><summary class="hint">${c.unresolved} unresolved comparison${c.unresolved===1?'':'s'} (status/page/excerpt differs though values match, or a canonical ID is missing — code cannot compare, so it stays UNRESOLVED)</summary>
+      ${(sh.fields||[]).filter(f=>f.status==='UNRESOLVED').map(f=>`<div class="hint mono">${esc(f.k)} — ${esc(f.reason||'')}${f.primary!=null?' · primary "'+esc(f.primary)+'"':''}${f.verify!=null?' · verifier "'+esc(f.verify)+'"':''}</div>`).join('')}</details>`:''}</div>`}
 function viewSCR1(){
   const copyable=f=>f.s==='EXTRACTED'||f.s==='NOT_APPLICABLE';
   const allV=S.scr1.fields.filter(copyable).every(f=>S.verified[f.k]);
@@ -2208,6 +2380,9 @@ function viewSCR1(){
   ${idbar()}
   <div class="sec"><h3>Issues → ledger</h3><span class="rule"></span></div>
   ${S.ledger.filter(i=>i.from==='SCR1').map(i=>ledgerCard(i,!done)).join('')||'<p class="note">No issues raised.</p>'}
+  ${S.ledger.some(i=>i.shadow)?`<div class="sec"><h3>Shadow pilot — MEASUREMENT ONLY</h3><span class="rule"></span></div>
+  <p class="hint">Same-vendor shadow items. Reviewing them feeds the pilot's measurement; they are NEVER required for sign-off and never block anything.</p>
+  ${S.ledger.filter(i=>i.shadow).map(i=>ledgerCard(i,!done)).join('')}`:''}
   <div class="sec"><h3>DB entry — verify → copy → rate</h3><span class="rule"></span></div>
   <div class="card">
   ${S.scr1.fields.map(f=>(S.verified[f.k]&&!EDITING[f.k]&&!EXPANDED[f.k]&&!done)
