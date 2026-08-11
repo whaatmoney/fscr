@@ -402,7 +402,7 @@ function freshInstance(){return {schema:'qpc.fscr.beta/v2',createdAt:new Date().
 // asserts the zip name matches BUILD.id). Rendered in the footer so the floor
 // can see which build a tab is running; stamped into every saved instance so
 // harvests carry build attribution.
-const BUILD={id:'r28e',updated:'2026-08-09'};
+const BUILD={id:'r29i',updated:'2026-08-10'};
 addEventListener('DOMContentLoaded',()=>{const el=document.getElementById('build-stamp');
   if(el)el.textContent='FSCR Beta — build '+BUILD.id+' · updated '+BUILD.updated+' · if the floor announcement names a newer build, refresh this tab.'});
 const CHG={seq:0,saved:0,baseline:false};
@@ -515,7 +515,7 @@ function featureMigrate(j){
     if(matMiss&&!hasMatGate){
       (j.ledger=j.ledger||[]).push({id:'mat-1',kind:'material-id',deterministic:true,
         label:'MATERIAL IDENTIFICATION — REQUIRED',cls:'ALERT',gate:'RECEIVING',tier:1,
-        act:'Identify the material at receiving inspection and record it here with its source. If it cannot be positively identified, do not close this item — escalate to QM before cleaning.',
+        act:'Identify the material at receiving inspection and record it here with its source. If it cannot be positively identified, do not close this item — have receiving or your lead identify it, or a supervisor can record PROCEED AT RISK on this card.',
         why:'The PO does not state the material. Record what the parts ARE before cleaning starts.',
         from:'MIGRATION',state:'OPEN',res:null,audit:[{at:new Date().toISOString(),what:'created on load — PO material field is MISSING (deterministic requirement)',by:'MIGRATION'}]});}
   }
@@ -869,7 +869,7 @@ function buildJobFromRaw(raw,fname,b64){
   if(matMissing){
     job.ledger.push({id:'mat-1',kind:'material-id',deterministic:true,
       label:'MATERIAL IDENTIFICATION — REQUIRED',cls:'ALERT',gate:'RECEIVING',tier:1,
-      act:'Identify the material at receiving inspection and record it here with its source. If it cannot be positively identified, do not close this item — escalate to QM before cleaning.',
+      act:'Identify the material at receiving inspection and record it here with its source. If it cannot be positively identified, do not close this item — have receiving or your lead identify it, or a supervisor can record PROCEED AT RISK on this card.',
       why:'The PO does not state the material. Record what the parts ARE before cleaning starts.',
       notes:matFolded.length?matFolded:undefined,
       from:'SCR1',state:'OPEN',res:null,audit:[]});}
@@ -2078,7 +2078,17 @@ function presentationFor(i,stage){
   const g=effGate(i);
   const due=GATE_DUE[g]||'SCR1';
   const dueNow=GATE_ORDER.indexOf(g)<=(STAGE_MAX[stage]!==undefined?STAGE_MAX[stage]:GATE_ORDER.length);
-  if(st==='OVERRIDDEN')return {state:'REQUIRED_BY',due:'SHIP',dueNow:stage==='FI',exception:true};
+  // r29 (Tyler's ruling 2026-08-10) + r29b (audit 2026-08-10, finding 1):
+  // a material PROCEED-AT-RISK permits work THROUGH CLEANING only — Tyler's
+  // words authorized cleaning to continue, not closure. Before FI the item
+  // is a tracked exception (never blocks); AT FI it blocks again: the job
+  // cannot close until the material is identified. Price overrides keep
+  // the SHIP-exception shape.
+  if(st==='OVERRIDDEN')return i.kind==='material-id'
+    ?(stage==='FI'
+      ?{state:'REQUIRED_BY',due:GATE_DUE[effGate(i)]||'CLEANING',dueNow:true}
+      :{state:'REQUIRED_BY',due:GATE_DUE[effGate(i)]||'CLEANING',dueNow:false,exception:true})
+    :{state:'REQUIRED_BY',due:'SHIP',dueNow:stage==='FI',exception:true};
   if(i.cls==='HOLD')return dueNow?{state:'STOP_NOW',due}:{state:'REQUIRED_BY',due,dueNow:false};
   // ALERT class — a REAL task vs. information: deterministic requirements,
   // the one price task, items carrying an actionable correction, and
@@ -2161,7 +2171,7 @@ function materialIdError(mat,src){
   // "PRIOR WO / HISTORY", "RECEIVING-INSPECTION" collapse to words and are
   // caught; a real material anywhere in the text still passes.
   const mNorm=m.toUpperCase().replace(/[^A-Z0-9'?]+/g,' ').trim();
-  if(MAT_UNCERTAIN.test(mNorm)||MAT_UNCERTAIN.test(m.toUpperCase()))return 'The material has to be POSITIVELY identified before cleaning. If it cannot be identified, do not close this item — escalate to QM.';
+  if(MAT_UNCERTAIN.test(mNorm)||MAT_UNCERTAIN.test(m.toUpperCase()))return 'The material has to be POSITIVELY identified before cleaning. If it cannot be identified, do not close this item — have receiving or your lead identify it, or a supervisor can record PROCEED AT RISK below.';
   // r26g: token rule — ignore pure reference numbers; at least one remaining
   // token must fall OUTSIDE the source/verification vocabulary
   const bearing=mNorm.split(/\s+/).filter(t=>t&&!/^\d+$/.test(t));
@@ -2273,7 +2283,7 @@ window.deferL=(id,btn)=>{
   const it0=lit(id);
   // r26d (audit P0-1): the material requirement is mechanically impossible to
   // postpone — no deferral, ever. Escalation to QM is the only other path.
-  if(it0&&it0.kind==='material-id'){alert('MATERIAL IDENTIFICATION cannot be moved — the material must be identified before cleaning. If it cannot be identified, escalate to QM.');return}
+  if(it0&&it0.kind==='material-id'){alert('MATERIAL IDENTIFICATION cannot be moved — the material must be identified before cleaning. If it truly cannot be identified, a supervisor can record PROCEED AT RISK on the card.');return}
   const f=btn.closest('.rform');const it=lit(id);
   const gate=f.querySelector('select').value,reason=f.querySelector('input.ev').value.trim(),by=f.querySelector('input.ini').value.trim();
   if(!reason||!by){alert('Deferral requires a reason AND initials.');return}
@@ -2290,7 +2300,7 @@ window.reassignL=(id,btn)=>{
   const it0=lit(id);
   // r26d (audit P0-1): the material requirement's gate is fixed — reassignment
   // could postpone it past the required stage.
-  if(it0&&it0.kind==='material-id'){alert('MATERIAL IDENTIFICATION must be answered at receiving — its required point cannot be moved. If the material cannot be identified, escalate to QM.');return}
+  if(it0&&it0.kind==='material-id'){alert('MATERIAL IDENTIFICATION must be answered at receiving — its required point cannot be moved. If it truly cannot be identified, a supervisor can record PROCEED AT RISK on the card.');return}
   const f=btn.closest('.rform');const it=lit(id);
   const gate=f.querySelector('select').value,reason=f.querySelector('input.ev').value.trim(),by=f.querySelector('input.ini').value.trim();
   if(!reason||!by){alert('Correcting the required point needs a reason AND initials — the move is audited.');return}
@@ -2308,6 +2318,94 @@ window.overrideL=(id,btn)=>{
   it.state='OVERRIDDEN';it.override={approver,reason,accessRef,at:new Date().toISOString(),by};
   lAudit(it,'SHIP OVERRIDE recorded (authorization governed by SP0120/G1, not FSCR)',by,'approver '+approver+' · Access ref '+accessRef+' · '+reason);
   persistDraft();render();toast('⚠ Exception recorded — shipment permitted; the item stays open for follow-up')};
+// r29–r29i PROCEED AT RISK. RULING (Tyler, 2026-08-10, CLOSED — his
+// "i rule that…" statement, which arrived DURING the r29g audit (after
+// r29g was packaged, before its verdict); provenance verified genuinely
+// closed by the r29h audit; full chain in HANDOFF §2): "i rule that a
+// supervisor may authorize cleaning to proceed while the material
+// remains unconfirmed, but the job cannot close at Final Inspection
+// until the material is identified." Behavior: an exception BEFORE FI
+// (cleaning-era sign-offs never blocked), BLOCKS at FI until the
+// material is identified; NO separate FI final exception (the sentence
+// omits it).
+// r29e (audit 2026-08-10): STRUCTURED authorization fields — separate
+// first/last name, per-type reference fields, exact record-number format
+// (the tool's own 5-digit WO shape). Typed fields cannot AUTHENTICATE
+// (positioning ruling: typed identity is a convention until SSO — Entra
+// remains TBV-PROPOSED); the structure + audit trail is the control.
+const MAT_ROLE_WORDS=new Set(['SUPERVISOR','LEAD','MANAGER','MGR','BOSS','QM','QA','QC','FOREMAN','SHIFT','THE','MR','MRS','MS','PERSON','SOMEBODY','SOMEONE','ANYONE','NAME','TEST','NONE']);
+const MAT_REF_STOP=new Set(['EMAIL','FROM','SENT','DATED','RE','THE','PER','ON','AT']);
+// r29h (audit 2026-08-10): the floor lives on LOCAL calendar days — the
+// future-date boundary must use the local date, not UTC (today() is
+// toISOString-based; at 5:30 PM Los Angeles the UTC date is already
+// tomorrow, which let a local-future date through).
+const localToday=()=>{const d=new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+// r29f (audit 2026-08-10): only the SELECTED reference type's fields are
+// visible — switching types hides AND CLEARS the others (a stale hidden
+// value can never ride along on a record of a different type).
+window.matRefVis=sel=>{const f=sel.closest('.ovform');if(!f)return;
+  const t=String(sel.value||'');
+  const show=(cls,on)=>{const el=f.querySelector(cls);if(!el)return;
+    el.style.display=on?'':'none';if(!on)el.value='';};
+  show('input.aref',t==='ACCESS NOTE'||t==='WO NOTE');
+  show('input.esender',t==='EMAIL');show('input.edate',t==='EMAIL');};
+window.matProceedL=(id,btn)=>{if(needRv())return; // r29b: an active identity is REQUIRED — the record binds to it
+  const f=btn.closest('.ovform');const it=lit(id);if(!it||it.kind!=='material-id')return;
+  const first=f.querySelector('input.appr1')?String(f.querySelector('input.appr1').value||'').trim():'';
+  const last=f.querySelector('input.appr2')?String(f.querySelector('input.appr2').value||'').trim():'';
+  const reason=f.querySelector('input.basis').value.trim();
+  const artype=String((f.querySelector('select.areftype')||{}).value||'');
+  const by=f.querySelector('input.ini').value.trim();
+  if(!by){alert('PROCEED AT RISK requires your initials.');return}
+  // r29e: each name PART is validated on its own — filler ("OKAY"),
+  // generic persons ("PERSON"), roles, and initials are refused per field.
+  const nameOk=t=>{const u=t.toUpperCase().replace(/[^A-Z]/g,'');
+    return u.length>=2&&!MAT_ROLE_WORDS.has(u)&&!isVagueClosure(t)};
+  if(!first||!last||!nameOk(first)||!nameOk(last)){alert('Name the supervisor — FIRST and LAST name in their own fields. Roles, initials, and filler words ("OKAY", "PERSON") are not a name.');return}
+  const approver=first+' '+last;
+  // r29b (audit finding 2): the recorder is the ACTIVE identity — no
+  // recording under someone else's initials (typed identity is a
+  // convention, not authentication, but the binding is enforced).
+  if(by!==RV.ini){alert('The recorder initials must match your active identity ('+RV.ini+') — the record binds to whoever is signed in. If the supervisor is recording this, they set their own identity first.');return}
+  if(!artype){alert('Select where the authorization is documented — ACCESS NOTE, WO NOTE, or EMAIL. The approval artifact lives outside this tool; FSCR records only its reference.');return}
+  let refStore=null;
+  if(artype==='EMAIL'){
+    // r29f: SEPARATE sender + date fields. Sender = a structured NAME
+    // (≥2 tokens, per-token validated) OR a valid email ADDRESS — a
+    // generic single token ("CUSTOMER", "YES") never passes. Date = a
+    // native date input, RE-VALIDATED in the handler as a genuine
+    // calendar date (round-trip check kills 2026-13-40).
+    const sender=f.querySelector('input.esender')?String(f.querySelector('input.esender').value||'').trim():'';
+    const edate=f.querySelector('input.edate')?String(f.querySelector('input.edate').value||'').trim():'';
+    const isAddr=/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(sender);
+    const sToks=sender.toUpperCase().split(/[^A-Z]+/).filter(Boolean);
+    const GENERIC=t=>MAT_ROLE_WORDS.has(t)||MAT_REF_STOP.has(t)||['CUSTOMER','SERVICE','SUPPORT','SALES','ADMIN','TEAM','OFFICE','DEPT','INFO','NOREPLY'].includes(t);
+    const isName=sToks.length>=2
+      &&sToks.some(t=>t.length>=3&&!GENERIC(t))
+      &&!sToks.some(t=>isVagueClosure(t)||GENERIC(t));
+    if(!(isAddr||isName)){alert('"'+sender+'" does not identify the email sender — enter their name (first and last) or their email address.');return}
+    const dm=edate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    let dateOk=false;
+    if(dm){const y=+dm[1],mo=+dm[2],da=+dm[3];const d=new Date(Date.UTC(y,mo-1,da));
+      dateOk=d.getUTCFullYear()===y&&d.getUTCMonth()===mo-1&&d.getUTCDate()===da&&y>=2020;}
+    if(!dateOk){alert('"'+edate+'" is not a real date — pick the email date from the date field.');return}
+    // r29g+r29h (audits 2026-08-10): an authorization email cannot be dated
+    // in the FUTURE — measured on the floor's LOCAL calendar, not UTC.
+    if(edate>localToday()){alert('"'+edate+'" is in the future — the authorization email must already exist. Enter its actual date.');return}
+    refStore='EMAIL: '+sender+' '+edate;
+  }else{
+    // r29f: the ENTIRE value is anchored to the tool's own WO shape —
+    // optional "WO" prefix, exactly five digits, optional WA/RW suffix.
+    // Nothing rides along ("43970 garbage" and "43970-XX" refuse).
+    const aref=f.querySelector('input.aref')?String(f.querySelector('input.aref').value||'').trim():'';
+    if(!/^(WO\s*)?\d{5}(-?(WA|RW))?$/i.test(aref)){alert('"'+aref+'" is not a WO/record number — enter EXACTLY the number: 5 digits, optional WO prefix, optional WA/RW suffix (e.g. 43970, WO 43970, 43970-WA).');return}
+    refStore=artype+': '+aref;
+  }
+  if(!reason||isVagueClosure(reason)){alert('State the basis — why is it OK to clean without the material confirmed? ("'+(reason||'')+'" says nothing.)');return}
+  it.state='OVERRIDDEN';it.override={approver,reason,aref:refStore,at:new Date().toISOString(),by};
+  lAudit(it,'PROCEED AT RISK recorded — material unconfirmed; work permitted through cleaning; job cannot close until identified (scope: Tyler’s option-1 choice 2026-08-10, conservative FI boundary)',by,'authorized by '+approver+' · ref '+refStore+' · '+reason);
+  persistDraft();render();toast('⚠ Proceed at risk recorded — work continues through cleaning; the material must still be identified before the job closes')};
 window.copyVal=(btn,val)=>{navigator.clipboard&&navigator.clipboard.writeText(val);
   const t=btn.textContent;btn.textContent='✓ Copied';btn.disabled=true;setTimeout(()=>{btn.textContent=t;btn.disabled=false},1200)};
 function gateSelect(sel){return '<select>'+GATE_ORDER.map(g=>'<option'+(g===sel?' selected':'')+'>'+g+'</option>').join('')+'</select>'}
@@ -2319,14 +2417,18 @@ function ledgerCard(i,showResolve){
   const p=presentationFor(i,(S&&S.stage)||'SCR1');
   const actionable=p.state==='STOP_NOW'||p.state==='REQUIRED_BY';
   const badge=st==='RESOLVED'?(ics?'<span class="badge b-navy">INTERNAL CONTROLLED SOURCE</span>':'<span class="badge b-ok">DONE</span>')
-    :st==='OVERRIDDEN'?'<span class="badge b-alert">SHIPMENT EXCEPTION RECORDED — VERIFICATION STILL OUTSTANDING</span>'
+    :st==='OVERRIDDEN'?(i.kind==='material-id'
+      ?'<span class="badge b-alert">PROCEED AT RISK RECORDED — MATERIAL STILL UNCONFIRMED · IDENTIFY BEFORE THE JOB CLOSES</span>'
+      :'<span class="badge b-alert">SHIPMENT EXCEPTION RECORDED — VERIFICATION STILL OUTSTANDING</span>')
     :`<span class="badge ${p.state==='STOP_NOW'?'b-hold':p.state==='INFORMATION'||p.state==='MEASUREMENT_ONLY'?'b-navy':'b-alert'}">${stateBadgeText(p)}</span>`;
   const outcomes=(i.kind==='price')?['PRICE VERIFIED']:(i.kind==='material-id')?['MATERIAL IDENTIFIED']:(i.ise?L_OUTCOMES.concat(['INTERNAL CONTROLLED SOURCE']):L_OUTCOMES);
   return `<div class="issue ${st==='RESOLVED'?'res':i.cls==='HOLD'?'hold':'alert'}">
     ${badge}${i.legacyUnaudited?' <span class="badge b-alert">LEGACY — UNAUDITED</span>':''}${(i.carried&&i.carried.length)?` <span class="badge b-navy">${i.carried[i.carried.length-1].specialized?'SPECIALIZED BY EVIDENCED RESTATEMENT':'PREVIOUSLY DISPOSITIONED — CARRIED FORWARD'} (${esc(i.carried[i.carried.length-1].stage)})</span>`:''}${(i.parks||[]).map(p=>` <span class="badge b-navy" title="Park flag — audited; never closes the item, never changes when it is due">\u23f8 ${esc(p.kind)} REQUESTED — ${p.name?esc(p.name)+' · ':''}${esc(p.by)} ${p.date}${st!=='RESOLVED'&&showResolve?` <a href="#" style="color:inherit" title="Clear this park flag (audited)" onclick="clearPark('${i.id}','${p.kind}');return false">✕</a>`:''}</span>`).join('')}
     <span class="lab">${esc(i.label)}</span>
     <span class="meta">${st==='RESOLVED'?`${esc(i.res.outcome||'')} · ${esc(i.res.by)} · ${i.res.date} · ${esc(i.res.note)}${i.res.src?' · source: '+esc(i.res.src):''}${i.adjud?' · feedback: '+esc(i.adjud.validity)+(i.adjud.value?' / '+esc(i.adjud.value):''):''}`
-      :st==='OVERRIDDEN'?`exception: ${esc(i.override?.approver||'')} · Access ref ${esc(i.override?.accessRef||'')} · ${esc((i.override?.at||'').slice(0,10))} · recorded by ${esc(i.override?.by||'')} — verification still outstanding`
+      :st==='OVERRIDDEN'?(i.kind==='material-id'
+        ?`proceed at risk: authorized by ${esc(i.override?.approver||'')} · ref ${esc(i.override?.aref||'')} · ${esc((i.override?.at||'').slice(0,10))} · recorded by ${esc(i.override?.by||'')} · ${esc(i.override?.reason||'')} — material still unconfirmed; the job cannot close until it is identified`
+        :`exception: ${esc(i.override?.approver||'')} · Access ref ${esc(i.override?.accessRef||'')} · ${esc((i.override?.at||'').slice(0,10))} · recorded by ${esc(i.override?.by||'')} — verification still outstanding`)
       :p.state==='STOP_NOW'?'stops the current work — clear it before continuing'
       :p.state==='REQUIRED_BY'?(p.dueNow?'must be finished before this stage signs off':'finish before '+esc(p.due||''))
       :'information — no action required'}</span>
@@ -2357,6 +2459,19 @@ function ledgerCard(i,showResolve){
       <button class="primary" onclick="resolveL('${i.id}',this)">Resolve</button></div>
       ${i.kind==='price'&&S.stage==='SCR1'?`<div class="rform"><span class="hint">Default at SCR1 (ruling 2026-07-16): defer — price closes only with a real quote/DB reference.</span>
       <button onclick="deferPriceToShip('${i.id}')">Defer to SHIP (default)</button></div>`:''}`:''}
+    ${st!=='RESOLVED'&&st!=='OVERRIDDEN'&&showResolve&&i.kind==='material-id'?`<details class="matov" style="border-top:1px dashed var(--line);padding-top:6px">
+      <summary class="hint" style="cursor:pointer">Material cannot be identified?</summary>
+      <div class="ovform rform">
+      <span class="hint" style="flex-basis:100%">A supervisor can authorize PROCEED AT RISK — work continues through cleaning, the question stays open and tracked, and the job CANNOT close until the material is identified (ruling 2026-08-10; authorization is governed by QPC supervision, not this tool — record where it is documented).</span>
+      <input class="appr1" placeholder="Supervisor FIRST name" style="width:150px">
+      <input class="appr2" placeholder="Supervisor LAST name" style="width:150px">
+      <input class="basis" placeholder="Basis — why proceeding is OK without the material confirmed" style="width:300px">
+      <select class="areftype" onchange="matRefVis(this)"><option value="">— authorization documented as —</option><option>ACCESS NOTE</option><option>WO NOTE</option><option>EMAIL</option></select>
+      <input class="aref" placeholder="WO / record number — 5 digits, e.g. 43970" style="width:230px;display:none">
+      <input class="esender" placeholder="Email sender — name or address" style="width:190px;display:none">
+      <input class="edate" type="date" max="${localToday()}" title="Email date" style="width:150px;display:none">
+      <input class="ini" placeholder="Your initials" value="${escA(RV.ini)}">
+      <button onclick="matProceedL('${i.id}',this)">Record PROCEED AT RISK</button></div></details>`:''}
     ${st!=='RESOLVED'&&showResolve&&i.kind==='price'?`<div class="ovform rform" style="border-top:1px dashed var(--line);padding-top:6px">
       <span class="hint" style="flex-basis:100%">Shipment exception (SP0120/G1) — authorization is governed by SP0120/G1, not this tool. The approval must be documented in Access; enter its reference. Shipment is permitted but verification stays open.</span>
       <input class="appr" placeholder="Approver name">
@@ -2406,7 +2521,9 @@ function ledgerSection(showActions,triage){
   const info=ops.filter(i=>P(i).state==='INFORMATION');
   const done=ops.filter(i=>P(i).state==='COMPLETED');
   const summary=`${stop.length} stop now · ${reqNow.length+reqLater.length} to finish (${reqNow.length} before this sign-off) · ${info.length} information note${info.length===1?'':'s'}`;
-  return `<p class="note"><b style="color:${(stop.length||reqNow.length)?'var(--bad)':'var(--ok)'}">${summary}</b>${exc.length?' · '+exc.length+' shipment exception recorded':''}</p>`
+  // r29: the exception counter is kind-neutral — material proceed-at-risk
+  // records are not "shipment" exceptions.
+  return `<p class="note"><b style="color:${(stop.length||reqNow.length)?'var(--bad)':'var(--ok)'}">${summary}</b>${exc.length?' · '+exc.length+' exception'+(exc.length===1?'':'s')+' recorded — still tracked':''}</p>`
     +stop.map(i=>ledgerCard(i,showActions)).join('')
     +reqNow.map(i=>ledgerCard(i,showActions)).join('')
     +(reqLater.length?`<details style="margin-top:6px"><summary class="hint">Finish later (${reqLater.length}) — due at a later stage</summary>${reqLater.map(i=>ledgerCard(i,showActions)).join('')}</details>`:'')
