@@ -383,6 +383,13 @@ const STAGE_MAX={SCR1:1,SCR2:3,FI:6};
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const escA=s=>esc(s).replace(/"/g,'&quot;');
+// r29j (audit 2026-09-06 F04): a value interpolated INTO JAVASCRIPT inside an
+// inline handler is a JS string literal first (JSON.stringify — escapes the
+// quote, the backslash, and control characters) and an HTML attribute value
+// second (escA). escA alone left an imported field key able to close the JS
+// string and run code when the row was clicked. Imported identifiers are ALSO
+// validated at the import boundary (validateImported) — defense in depth.
+const escJS=s=>escA(JSON.stringify(String(s??'')));
 const today=()=>new Date().toISOString().slice(0,10);
 const norm=s=>(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
 
@@ -402,13 +409,23 @@ function freshInstance(){return {schema:'qpc.fscr.beta/v2',createdAt:new Date().
 // asserts the zip name matches BUILD.id). Rendered in the footer so the floor
 // can see which build a tab is running; stamped into every saved instance so
 // harvests carry build attribution.
-const BUILD={id:'r29i',updated:'2026-08-10'};
+const BUILD={id:'r29k',updated:'2026-09-06'};
 addEventListener('DOMContentLoaded',()=>{const el=document.getElementById('build-stamp');
   if(el)el.textContent='FSCR Beta — build '+BUILD.id+' · updated '+BUILD.updated+' · if the floor announcement names a newer build, refresh this tab.'});
 const CHG={seq:0,saved:0,baseline:false};
 const isDirty=()=>CHG.baseline&&CHG.seq>CHG.saved;
 window.addEventListener('beforeunload',e=>{if(isDirty()){e.preventDefault();e.returnValue=''}});
-function persistDraft(){CHG.seq++;try{localStorage.setItem('fscr.beta.draft',JSON.stringify(S))}catch(e){}}
+// r29j (audit 2026-09-06 F06): persistence failures are VISIBLE. A failed tab
+// autosave sets DRAFT.err (rendered as a standing banner); a failed instance
+// download alerts, keeps the tab DIRTY, and records nothing as saved.
+const DRAFT={err:null};
+function persistDraft(){CHG.seq++;if(S)CHG.baseline=true; // r29k: any persisted job state is unsaved work worth protecting — dirty is defined from the FIRST change, not the first successful save
+  try{localStorage.setItem('fscr.beta.draft',JSON.stringify(S));DRAFT.err=null;return true}
+  catch(e){DRAFT.err=String(e&&e.message||e);return false}}
+function staleBanner(){if(!S||!['SCR2','FI'].includes(S.stage))return '';const rep=reportFor(S.stage,S);if(!rep||!reportStale(S.stage,S))return '';
+  const why=rep.unbound?'was produced before documents were fingerprinted, so it cannot be proven to describe the documents on file':'does not match the documents now on file (a document changed after it was produced)';
+  return '<div class="card" style="border-color:var(--warn);background:rgba(200,120,0,.08)"><b style="color:var(--warn)">\u26a0 The '+esc(S.stage)+' report on this job '+why+'.</b> It is shown as NO report: re-run the '+esc(S.stage)+' audit before sign-off.</div>'}
+function draftBanner(){return staleBanner()+(DRAFT.err?'<div class="card" style="border-color:var(--warn);background:rgba(200,120,0,.08)"><b style="color:var(--warn)">\u26a0 Tab autosave is failing</b> ('+esc(DRAFT.err.slice(0,80))+'). Your work is only in this tab until you save the instance file \u2014 save now.</div>':'')}
 function clearDraft(){try{localStorage.removeItem('fscr.beta.draft')}catch(e){}}
 
 function saveInstance(job,tag){
@@ -416,11 +433,18 @@ function saveInstance(job,tag){
   J.lastSavedBuildId=BUILD.id; // r19: 'build that most recently saved' lives HERE, never in createdBuildId
   J.history.push({at:new Date().toISOString(),stage:J.stage,by:RV.ini||'',build:BUILD.id,event:'SAVE'});
   const nm='fscr_'+(J.wo||J.po||'job').replace(/[^A-Za-z0-9-]/g,'')+'_'+J.stage+(tag?'_'+tag:'')+'.json';
+  let downloaded=false,failMsg='';
   try{const b=new Blob([JSON.stringify(J)],{type:'application/json'});
-    const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=nm;a.click();}catch(e){}
-  if(J===S)persistDraft();
-  if(J===S){CHG.saved=CHG.seq;CHG.baseline=true;if(typeof render==='function')render();}
-  toast('\u2713 Instance saved \u2014 '+nm); return nm;
+    const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=nm;a.click();downloaded=true;}catch(e){failMsg=String(e&&e.message||e)}
+  if(!downloaded){J.history.pop(); // the SAVE never happened — no record of one
+    if(J===S)persistDraft(); // seq advances; saved does NOT — the tab stays dirty
+    if(typeof render==='function')render();
+    alert('SAVE FAILED \u2014 the browser could not create the instance download ('+failMsg+'). NOTHING was saved; your work is still in this tab'+(DRAFT.err?' (and tab autosave is failing too \u2014 do not close this tab)':'')+'. Try again, or use a different browser.');
+    return null}
+  if(J===S){const ok=persistDraft();CHG.saved=CHG.seq;CHG.baseline=true;if(typeof render==='function')render();
+    if(!ok)toast('\u2713 Instance saved \u2014 '+nm+' (tab autosave failed \u2014 keep the downloaded file)');else toast('\u2713 Instance saved \u2014 '+nm);}
+  else toast('\u2713 Instance saved \u2014 '+nm);
+  return nm;
 }
 function ensurePriceItem(j){if(!j||j.stage==='CLOSED')return j;
   const has=(j.ledger||[]).some(i=>i.kind==='price'||/PRICE\s+VERIF/i.test(i.label||''));
@@ -438,6 +462,16 @@ function ensurePriceItem(j){if(!j||j.stage==='CLOSED')return j;
 // its presence before writing.
 function featureMigrate(j){
   if(!j)return j;
+  // r29j (F03): fingerprint every document on file; a pre-r29j report carries
+  // no inputs, so it is BOUND HERE to the documents on file at migration —
+  // recorded as such (boundAt), never presented as proof of what it read.
+  // r29k (review finding 4): a pre-fingerprint report on an UNFINISHED job
+  // is marked UNBOUND — it cannot prove which documents it audited, so it is
+  // stale until the audit is re-run. No binding is manufactured. CLOSED
+  // jobs are historical and untouched.
+  if(j.docs&&typeof j.docs==='object'){docSnapshot(j.docs)}
+  if(j.stage!=='CLOSED'){for(const st of ['SCR2','FI']){const rep=st==='SCR2'?j.scr2Report:j.fiReport;
+    if(rep&&typeof rep==='object'&&!rep.inputs&&!rep.unbound){rep.unbound='pre-'+BUILD.id+' report — documents it read are unproven';}}}
   if(j.createdBuildId===undefined)j.createdBuildId=null; // legacy/carryover: creation build UNKNOWN — never backfilled with the current build
   if(j.stage!=='CLOSED'&&j.scr1&&Array.isArray(j.scr1.fields)){
     for(const f of j.scr1.fields){
@@ -534,6 +568,69 @@ function featureMigrate(j){
   }
   return j;
 }
+// r29j (F04): an instance file is DATA. Every identifier the app later
+// interpolates or indexes with (field keys, ledger ids, document slots,
+// stage, verified-map keys) must match a strict shape or the file is REFUSED
+// whole — nothing is loaded. Legitimate files never fail this (keys are
+// app-generated: dotted field paths, 's2-1'/'mat-1' style ids).
+const ID_RE=/^[A-Za-z0-9_.:\-]{1,80}$/;
+const KNOWN_SLOTS=['po','traveler','labels','print','coc','packSlip'];
+// r29k (r29j review, findings 1+2): every property is validated against ITS
+// domain — enums where the app has them (field status, ledger state/class/
+// gate, park kind, stage, sign-off stage), identifier shape where the value
+// is an identifier, safe short text for recorded tokens, and plain strings
+// elsewhere. Escaping at render is the second line; this is the first.
+const FIELD_STATUS=['EXTRACTED','MISSING','UNCLEAR','CONFLICT','NOT_APPLICABLE','ENTRY'];
+const LEDGER_STATES=['OPEN','DEFERRED','OVERRIDDEN','RESOLVED'];
+const PARK_KINDS=['MANAGER CHECK'];
+const STAGES=['SCR1','SCR2','FI','CLOSED'];
+const TOKEN_RE=/^[A-Z0-9][A-Z0-9 \-_\/.:(),'&—–+]{0,80}$/; // recorded vocabulary tokens (feedback answers, outcomes) — the app's own outcomes carry em dashes ("VERIFIED — COMPLIES"); real-file round trip 2026-09-06
+function validateImported(o){
+  const bad=[];const B=(w)=>{if(bad.length<12)bad.push(w)};
+  const q=v=>JSON.stringify(String(v)).slice(0,60);
+  const isObj=v=>v&&typeof v==='object'&&!Array.isArray(v);
+  // limits are generous: real PO special-instruction values run past 4,000 chars (real-file round trip 2026-09-06: 44181, 44223)
+  const str=(v,what,max=200000)=>{if(v===undefined||v===null)return;if(typeof v!=='string')B(what+' not text');else if(v.length>max)B(what+' too long ('+v.length+')')};
+  const id=(v,what)=>{if(!ID_RE.test(String(v)))B(what+' '+q(v))};
+  const en=(v,set,what)=>{if(v===undefined||v===null)return;if(!set.includes(v))B(what+' '+q(v))};
+  const tok=(v,what)=>{if(v===undefined||v===null||v==='')return;if(typeof v!=='string'||!TOKEN_RE.test(v))B(what+' '+q(v))};
+  if(!isObj(o))return ['not an object'];
+  en(o.stage,STAGES,'stage');
+  if(o.scr1!==undefined&&o.scr1!==null){if(!isObj(o.scr1))B('scr1 not an object');
+    else{if(!Array.isArray(o.scr1.fields))B('scr1.fields not an array');
+      else for(const f of o.scr1.fields){if(!isObj(f)){B('field entry not an object');continue}
+        id(f.k,'field key');en(f.s,FIELD_STATUS,'field status');str(f.l,'field label',400);str(f.v,'field value');str(f.why,'field why');str(f.src,'field source');
+        str(f.editedBy,'field editedBy',40);str(f.enteredBy,'field enteredBy',40);tok(f.entrySrc,'field entrySrc');}
+      if(o.scr1.excluded!==undefined&&!Array.isArray(o.scr1.excluded))B('scr1.excluded not an array');}}
+  if(o.verified!==undefined){if(!isObj(o.verified))B('verified not an object');else for(const k of Object.keys(o.verified))id(k,'verified key')}
+  if(o.fb!==undefined){if(!isObj(o.fb))B('fb not an object');else for(const k of Object.keys(o.fb)){id(k,'feedback key');const e=o.fb[k];if(!isObj(e)){B('feedback entry not an object');continue}tok(e.ext,'feedback ext');tok(e.xf,'feedback xf')}}
+  if(o.ledger!==undefined){if(!Array.isArray(o.ledger))B('ledger not an array');
+    else for(const i of o.ledger){if(!isObj(i)){B('ledger entry not an object');continue}
+      id(i.id,'ledger id');en(i.state,LEDGER_STATES,'ledger state');en(i.cls,['HOLD','ALERT'],'ledger class');
+      if(i.gate!==undefined&&i.gate!==null&&!GATE_ORDER.includes(i.gate))B('ledger gate '+q(i.gate));
+      if(i.kind!==undefined&&i.kind!==null)id(i.kind,'ledger kind');
+      str(i.label,'ledger label',2000);str(i.field,'ledger field',400);str(i.why,'ledger why');str(i.act,'ledger action');
+      if(i.parks!==undefined){if(!Array.isArray(i.parks))B('parks not an array');else for(const p of i.parks){if(!isObj(p)){B('park not an object');continue}en(p.kind,PARK_KINDS,'park kind');str(p.by,'park by',40);str(p.name,'park name',120)}}
+      if(i.res!==undefined&&i.res!==null){if(!isObj(i.res))B('resolution not an object');else{tok(i.res.outcome,'resolution outcome');str(i.res.by,'resolution by',40);str(i.res.note,'resolution note');str(i.res.src,'resolution source',2000)}}
+      if(i.audit!==undefined&&!Array.isArray(i.audit))B('audit not an array');
+      if(i.notes!==undefined&&!Array.isArray(i.notes))B('notes not an array');}}
+  if(o.docs!==undefined&&o.docs!==null){if(!isObj(o.docs))B('docs not an object');
+    else for(const s of Object.keys(o.docs)){if(!KNOWN_SLOTS.includes(s)){B('document slot '+q(s));continue}
+      const v=o.docs[s];if(v===undefined||v===null)continue;
+      if(s==='labels'&&!Array.isArray(v)&&!isObj(v))B('labels not a list');
+      for(const d of (Array.isArray(v)?v:[v])){if(!isObj(d)||typeof d.name!=='string'||/[\u0000-\u001f<>]/.test(d.name)||d.name.length>255){B('document entry in '+s);continue}
+        if(typeof d.b64!=='string'||/[^A-Za-z0-9+\/=\r\n]/.test(d.b64))B('document bytes in '+s+' are not base64')}}}
+  if(o.signoffs!==undefined){if(!Array.isArray(o.signoffs))B('signoffs not an array');else for(const s of o.signoffs){if(!isObj(s)){B('sign-off not an object');continue}en(s.stage,['SCR1','SCR2','FI'],'sign-off stage');str(s.name,'sign-off name',120);str(s.ini,'sign-off initials',20)}}
+  if(o.history!==undefined&&!Array.isArray(o.history))B('history not an array');
+  for(const st of ['scr2Report','fiReport']){const r=o[st];if(r!==undefined&&r!==null&&!isObj(r))B(st+' not an object')}
+  return bad}
+// r29k (review finding 5): derived data in an imported file is NOT evidence.
+// Every document fingerprint is DROPPED and recomputed from the imported
+// bytes; a report whose recorded inputs disagree with the recomputed
+// fingerprints is thereby stale (it is never re-bound to make it current).
+function refingerprint(o){if(!o||!o.docs||typeof o.docs!=='object')return o;
+  for(const k of Object.keys(o.docs)){const v=o.docs[k];for(const d of (Array.isArray(v)?v:(v?[v]:[]))){if(d&&typeof d==='object')delete d.fp}}
+  docSnapshot(o.docs);return o}
 window.loadFile=inp=>{const f=inp.files[0];if(!f)return;const r=new FileReader();
   r.onload=()=>{try{const o=JSON.parse(r.result);
     if(o.schema!=='qpc.fscr.beta/v1'&&o.schema!=='qpc.fscr.beta/v2')throw new Error('Not an FSCR beta instance file.');
@@ -545,7 +642,9 @@ window.loadFile=inp=>{const f=inp.files[0];if(!f)return;const r=new FileReader()
       o.woFileMismatch={file:fnWo,instance:instWo,at:new Date().toISOString()};
     }
     const wasV1=o.schema==='qpc.fscr.beta/v1';
-    migrateInstance(o,today());ensurePriceItem(o);featureMigrate(o);
+    const badIds=validateImported(o);
+    if(badIds.length)throw new Error('REFUSED — this file is not a well-formed FSCR instance ('+badIds.slice(0,3).join('; ')+(badIds.length>3?'; +'+(badIds.length-3)+' more':'')+'). NOTHING was loaded.');
+    migrateInstance(o,today());ensurePriceItem(o);featureMigrate(o);refingerprint(o);
     S=o;persistDraft();CHG.saved=CHG.seq;CHG.baseline=true;render();
     if(wasV1){const reopened=(o.ledger||[]).filter(i=>(i.notes||[]).some(n=>n.by==='MIGRATION')).length;
       toast(reopened?('⚠ Instance migrated — '+reopened+' vague closure'+(reopened===1?'':'s')+' reopened as migrated notes'):'✓ Instance migrated to v2');}
@@ -587,7 +686,7 @@ window.startCatchup=()=>{if(needRv())return;
 // ---- identity + accuracy feedback -------------------------------------------
 window.setRv=()=>{RV.name=$('#rv-name').value.trim();RV.ini=$('#rv-ini').value.trim().toUpperCase();render()}
 function idbar(){
-  return `<div class="idbar">${RV.ini
+  return draftBanner()+`<div class="idbar">${RV.ini
     ? `You are: <b>${esc(RV.name)} (${esc(RV.ini)})</b> <button onclick="RV.name='';RV.ini='';render()">change</button>
        <span class="hint">— stamped on your feedback, resolutions, and sign-off</span>`
     : `<b>Who are you?</b> <input id="rv-name" placeholder="Full name" value="${escA(RV.name)}">
@@ -610,8 +709,8 @@ const ACC_DEF={USEFUL:'Real signal — this finding/row helped',NOISE:'Wasted at
 const ACC_CLS={USEFUL:'on-ACCURATE',NOISE:'on-WRONG',WRONG:'on-WRONG',UNCLEAR:'on-MINOR'};
 function accChip(key,label,mode){const a=S.accuracy[key]||{};const opts=mode==='ext'?['WRONG','UNCLEAR']:['USEFUL','NOISE'];
   return `<div class="acc"><span class="acc-l">${label||(mode==='ext'?'extraction':'useful?')}</span>
-    ${opts.map(f=>`<button class="acc-b ${a.f===f?ACC_CLS[f]:''}" title="${ACC_DEF[f]}" onclick="setAcc('${escA(key)}','${f}')">${f.charAt(0)+f.slice(1).toLowerCase()}</button>`).join('')}
-    <input class="acc-n" placeholder="note — what you checked / why…" value="${escA(a.note||'')}" onchange="setAccNote('${escA(key)}',this.value)">
+    ${opts.map(f=>`<button class="acc-b ${a.f===f?ACC_CLS[f]:''}" title="${ACC_DEF[f]}" onclick="setAcc(${escJS(key)},${escJS(f)})">${f.charAt(0)+f.slice(1).toLowerCase()}</button>`).join('')}
+    <input class="acc-n" placeholder="note — what you checked / why…" value="${escA(a.note||'')}" onchange="setAccNote(${escJS(key)},this.value)">
     ${a.by?`<span class="hint">${esc(a.by)}</span>`:''}</div>`}
 const FLAGGING={};
 window.flagFb=k=>{if(needRv())return;FLAGGING[k]=true;render()};
@@ -622,37 +721,63 @@ window.setFb=(k,ext)=>{if(needRv())return;const f=S.scr1.fields.find(x=>x.k===k)
   delete FLAGGING[k];persistDraft();render();toast('\u2713 Recorded — extraction '+ext.toLowerCase()+(f.editedBy?' · entry edited':''))};
 function fbRow(f){const fb=S.fb&&S.fb[f.k];const nid='fbn-'+f.k.replace(/[^A-Za-z0-9]/g,'_');
   if(f.entry){return f.enteredBy?`<span class="f-acc hint">entered from ${esc(f.entrySrc||'ACCESS')} by ${esc(f.enteredBy)} ${esc(f.enteredAt||'')}</span>`:''}
-  if(fb&&!fb.auto){return `<span class="f-acc hint">feedback: extraction ${fb.ext.toLowerCase()}${fb.note?' — '+esc(fb.note):''} · entry ${fb.xf==='EDITED'?'edited':'accepted'} (${esc(fb.by||'')}) <button onclick="delete S.fb['${escA(f.k)}'];persistDraft();render()">×</button></span>`}
+  if(fb&&!fb.auto){return `<span class="f-acc hint">feedback: extraction ${fb.ext.toLowerCase()}${fb.note?' — '+esc(fb.note):''} · entry ${fb.xf==='EDITED'?'edited':'accepted'} (${esc(fb.by||'')}) <button onclick="delete S.fb[${escJS(f.k)}];persistDraft();render()">×</button></span>`}
   if(f.editedBy){return `<span class="f-acc"><span class="acc-l">you edited — one question:</span>
-    <button class="acc-b" title="The value on the PO is different from what the parser returned" onclick="setFb('${escA(f.k)}','WRONG')">parser misread the PO</button>
-    <button class="acc-b" title="The parser read the PO correctly — this edit is how QPC enters it in Access" onclick="setFb('${escA(f.k)}','CORRECT')">PO read right — entry preference</button>
-    <button class="acc-b" onclick="setFb('${escA(f.k)}','UNCLEAR')">can’t tell</button>
+    <button class="acc-b" title="The value on the PO is different from what the parser returned" onclick="setFb(${escJS(f.k)},'WRONG')">parser misread the PO</button>
+    <button class="acc-b" title="The parser read the PO correctly — this edit is how QPC enters it in Access" onclick="setFb(${escJS(f.k)},'CORRECT')">PO read right — entry preference</button>
+    <button class="acc-b" onclick="setFb(${escJS(f.k)},'UNCLEAR')">can’t tell</button>
     <input class="acc-n" id="${nid}" placeholder="optional note"></span>`}
   if(FLAGGING[f.k]){return `<span class="f-acc"><span class="acc-l">flag extraction:</span>
-    <button class="acc-b" onclick="setFb('${escA(f.k)}','WRONG')">wrong vs the PO</button>
-    <button class="acc-b" onclick="setFb('${escA(f.k)}','UNCLEAR')">unclear</button>
+    <button class="acc-b" onclick="setFb(${escJS(f.k)},'WRONG')">wrong vs the PO</button>
+    <button class="acc-b" onclick="setFb(${escJS(f.k)},'UNCLEAR')">unclear</button>
     <input class="acc-n" id="${nid}" placeholder="what the PO actually says…">
-    <button onclick="cancelFb('${escA(f.k)}')">cancel</button></span>`}
-  return `<span class="f-acc"><button class="acc-b" title="Untouched fields auto-record extraction-correct + entry-accepted at sign-off — flag only if the extraction is wrong vs the PO" onclick="flagFb('${escA(f.k)}')">⚑ flag</button></span>`}
+    <button onclick="cancelFb(${escJS(f.k)})">cancel</button></span>`}
+  return `<span class="f-acc"><button class="acc-b" title="Untouched fields auto-record extraction-correct + entry-accepted at sign-off — flag only if the extraction is wrong vs the PO" onclick="flagFb(${escJS(f.k)})">⚑ flag</button></span>`}
 
 // ---- API -----------------------------------------------------------------------
-// claude-opus-4-8 pricing (USD per MTok) — cost math only; NO keys or secrets are ever stored
+// r30 (Tyler 2026-08-10): PRIMARY = claude-opus-5 ($5/$25 per MTok, same
+// tier as 4.8); VERIFIER stays claude-sonnet-5 (corrected to $2/$10);
+// claude-opus-4-8 kept as the REFUSAL FALLBACK for the primary only.
+// Cost math only; NO keys or secrets are ever stored.
 // r25: $/MTok per model. Client-side cost figures are ESTIMATES AND WARNINGS
 // ONLY (Tyler 07-24) — enforceable spending limits live in the vendor console.
+const PRIMARY_MODEL='claude-opus-4-8'; // r29j: floor-repair round stays on the r29i model line; the Opus 5 upgrade (validated r30c) ships as r30d
 const MODEL_MTOK={
+  'claude-opus-5':{inTok:5.00,outTok:25.00,cacheRead:0.50,cacheWrite:6.25},
   'claude-opus-4-8':{inTok:5.00,outTok:25.00,cacheRead:0.50,cacheWrite:6.25},
-  'claude-sonnet-5':{inTok:3.00,outTok:15.00,cacheRead:0.30,cacheWrite:3.75}};
-const MTOK_COST=MODEL_MTOK['claude-opus-4-8'];
+  'claude-sonnet-5':{inTok:2.00,outTok:10.00,cacheRead:0.20,cacheWrite:2.50}};
+const MTOK_COST=MODEL_MTOK[PRIMARY_MODEL];
 function calcCostFor(u,model){const R=MODEL_MTOK[model]||MTOK_COST;
   return Math.round(((u.inTok||0)*R.inTok+(u.outTok||0)*R.outTok
   +(u.cacheRead||0)*R.cacheRead+(u.cacheWrite||0)*R.cacheWrite)/1e6*10000)/10000}
-function calcCost(u){return calcCostFor(u,'claude-opus-4-8')}
+function calcCost(u){return calcCostFor(u,PRIMARY_MODEL)}
+// r30c (model validation finding): claude-opus-5 sometimes wraps a forced
+// tool call's arguments in ONE envelope key ({"input":{…}}, {"body":{…}},
+// params/values…) on long outputs. Unwrap exactly one level when the payload
+// has a single key whose object value carries most of the tool's required
+// keys; leave anything else untouched. buildJobFromRaw FAILS CLOSED if the
+// field block is still missing — never a CLEAR job of backfilled blanks.
+function unwrapToolInput(parsed,tool){
+  const req=(tool&&tool.input_schema&&tool.input_schema.required)||[];
+  const most=o=>{if(!req.length)return true;const n=req.filter(k=>k in o).length;return n>=Math.ceil(req.length/2)};
+  let inp=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};let from=null;
+  if(!most(inp)){const ks=Object.keys(inp);
+    if(ks.length===1){const inner=inp[ks[0]];
+      if(inner&&typeof inner==='object'&&!Array.isArray(inner)&&most(inner)){from=ks[0];inp=inner;}}}
+  // never mutate the caller's object: an unwrapped result is a shallow COPY carrying the marker
+  return from?Object.assign({},inp,{__unwrappedFrom:from}):inp;}
 async function callClaude(system,tool,content,label,opts){
   // r25: opts={model,metricsOut} \u2014 model defaults to the primary; metricsOut
   // (when given) receives this call's own metrics, immune to the shared
   // callClaude.last race under concurrency. Neither call in a dual run ever
   // receives the other's output, findings, confidence, or prompt chain.
-  const _model=(opts&&opts.model)||'claude-opus-4-8';
+  const _model=(opts&&opts.model)||PRIMARY_MODEL;
+  // r30: server-side REFUSAL FALLBACK on the PRIMARY only — a safety-classifier
+  // decline re-runs the same request on claude-opus-4-8 inside the same call
+  // (array form: header server-side-fallback-2026-06-01). The verifier gets no
+  // fallback: a refused shadow run degrades to AUDIT NOT PERFORMED honestly.
+  // The SERVED model is captured from message_start and recorded per call.
+  const _fb=_model===PRIMARY_MODEL&&/opus-5/.test(PRIMARY_MODEL); // r29j: the fallback param 400s on opus-4-8 — only armed when the primary is Opus 5 (r30d)
   // r25b (audit finding 5): a REAL deadline. opts.timeoutMs arms an
   // AbortController covering the entire call \u2014 connect, retries, and the
   // stream read \u2014 so a hung verifier can never wedge the dual run. The
@@ -665,12 +790,13 @@ async function callClaude(system,tool,content,label,opts){
   try{
     let resp;
     for(let attempt=0;;attempt++){
-      resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{
+      resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:Object.assign({
         'content-type':'application/json','x-api-key':KEY.v,'anthropic-version':'2023-06-01',
-        'anthropic-dangerous-direct-browser-access':'true'},
+        'anthropic-dangerous-direct-browser-access':'true'},_fb?{'anthropic-beta':'server-side-fallback-2026-06-01'}:{}),
         signal:_ctl?_ctl.signal:undefined,
-        body:JSON.stringify({model:_model,max_tokens:32000,stream:true,system,
-          tools:[tool],tool_choice:{type:'tool',name:tool.name},messages:[{role:'user',content}]})});
+        body:JSON.stringify(Object.assign({model:_model,max_tokens:32000,stream:true,system,
+          tools:[tool],tool_choice:{type:'tool',name:tool.name},messages:[{role:'user',content}]},
+          _fb?{fallbacks:[{model:'claude-opus-4-8'}]}:{}))});
       if(resp.ok)break;
       if((resp.status===429||resp.status===529||resp.status===503)&&attempt<3){
         const wait=20*(attempt+1);
@@ -688,26 +814,74 @@ async function callClaude(system,tool,content,label,opts){
       const e=await resp.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||('API error HTTP '+resp.status));
     }
     const reader=resp.body.getReader();const dec=new TextDecoder();let buf='',json='';
+    // r29j (audit 2026-09-06 F02): a reply that never opens the forced tool
+    // call (text, refusal text, an empty message) used to parse as {} and
+    // become an EMPTY REPORT with sign-off enabled. The tool_use block and
+    // the stop reason are tracked; anything but a completed tool call throws.
+    let toolIx=-1,toolStopped=false,stopReason='',msgStopped=false; // r29k: the tool block is tracked BY INDEX and must complete
     while(true){const{done,value}=await reader.read();if(done)break;
       buf+=dec.decode(value,{stream:true});let ix;
       while((ix=buf.indexOf('\n'))>=0){const line=buf.slice(0,ix).trim();buf=buf.slice(ix+1);
         if(!line.startsWith('data:'))continue;const d=line.slice(5).trim();if(!d||d==='[DONE]')continue;
         let ev;try{ev=JSON.parse(d)}catch(e){continue}
         if(ev.type==='message_start'&&ev.message&&ev.message.usage){const u=ev.message.usage;
-          _m.inTok+=u.input_tokens||0;_m.cacheRead+=u.cache_read_input_tokens||0;_m.cacheWrite+=u.cache_creation_input_tokens||0;}
+          _m.inTok+=u.input_tokens||0;_m.cacheRead+=u.cache_read_input_tokens||0;_m.cacheWrite+=u.cache_creation_input_tokens||0;
+          // r30: record the SERVED model (differs from the requested one only when the refusal fallback ran)
+          if(ev.message.model){_m.model=ev.message.model;if(ev.message.model!==_model)_m.fallbackFrom=_model;}}
         if(ev.type==='message_delta'&&ev.usage){_m.outTok=ev.usage.output_tokens||_m.outTok;}
-        if(ev.type==='content_block_delta'&&ev.delta&&ev.delta.type==='input_json_delta'){
+        if(ev.type==='message_delta'&&ev.delta&&ev.delta.stop_reason)stopReason=ev.delta.stop_reason;
+        if(ev.type==='message_stop')msgStopped=true;
+        if(ev.type==='content_block_start'&&ev.content_block&&ev.content_block.type==='tool_use'&&ev.content_block.name===tool.name&&toolIx<0)toolIx=ev.index;
+        if(ev.type==='content_block_stop'&&ev.index===toolIx&&toolIx>=0)toolStopped=true;
+        if(ev.type==='content_block_delta'&&ev.delta&&ev.delta.type==='input_json_delta'&&ev.index===toolIx){
           json+=ev.delta.partial_json;
           const el=$('#busy-msg');if(el)el.textContent=label+' \u2014 reading documents & auditing\u2026 ('+Math.round(json.length/1024)+' KB of findings so far)';}
         if(ev.type==='error')throw new Error((ev.error&&ev.error.message)||'stream error');}}
-    _m.ms=Date.now()-_t0;_m.cost=calcCostFor(_m,_model);callClaude.last=_m;
+    _m.ms=Date.now()-_t0;_m.cost=calcCostFor(_m,_m.model||_model);callClaude.last=_m;
     if(opts&&opts.metricsOut)Object.assign(opts.metricsOut,_m);
-    return JSON.parse(json||'{}');
+    if(toolIx<0)throw new Error(label+': the model returned NO '+tool.name+' result (no tool call in the reply'+(stopReason?'; stop_reason '+stopReason:'')+') — nothing was recorded. Re-run.');
+    if(stopReason==='max_tokens')throw new Error(label+': the reply was cut off at the output limit — the result is incomplete and was NOT recorded. Re-run.');
+    if(!toolStopped||!msgStopped||!stopReason)throw new Error(label+': the reply ended before the '+tool.name+' result completed (stream incomplete'+(stopReason?'; stop_reason '+stopReason:'; no stop reason')+') — nothing was recorded. Re-run.');
+    let parsed;try{parsed=JSON.parse(json||'{}')}catch(e){throw new Error(label+': the model\'s '+tool.name+' result was not valid JSON — nothing was recorded. Re-run.')}
+    const out=unwrapToolInput(parsed,tool);
+    const shapeErr=toolResultError(tool,out);
+    if(shapeErr)throw new Error(label+': '+shapeErr+' — nothing was recorded. Re-run.');
+    return out;
   }catch(e){
     if(_ctl&&_ctl.signal.aborted)throw new Error('timeout after '+Math.round(opts.timeoutMs/1000)+'s — the call was aborted');
     throw e;
   }finally{if(_kill)clearTimeout(_kill);BUSY.count--;BUSY.on=BUSY.count>0;if(!BUSY.on)BUSY.msg='';}
 }
+// r29j (F02): ONE validator for every stage's tool result. Every REQUIRED key
+// of the tool's own input schema must be present with the schema's type
+// (arrays are arrays, objects are objects, strings are strings). On top of
+// the schema: the audit sections that carry the comparison itself may not be
+// empty — an SCR2 with zero traveler rows or an FI with zero COC / pack-slip
+// checks compared nothing. Discrepancy lists MAY be empty (a clean job).
+const NONEMPTY_SECTIONS={emit_scr2:['travelerComparison'],emit_final_inspection:['cocChecks','packSlipChecks','traceability']};
+function schemaErrors(sch,v,path,out){if(!sch||out.length>=8)return out;
+  const t=sch.type;
+  if(sch.enum&&!sch.enum.includes(v)){out.push(path+' not one of '+JSON.stringify(sch.enum).slice(0,60));return out}
+  if(t==='object'){if(!v||typeof v!=='object'||Array.isArray(v)){out.push(path+' not an object');return out}
+    for(const k of (sch.required||[]))if(!(k in v)){out.push(path+'.'+k+' missing');if(out.length>=8)return out}
+    for(const k of Object.keys(sch.properties||{}))if(k in v)schemaErrors(sch.properties[k],v[k],path+'.'+k,out);}
+  else if(t==='array'){if(!Array.isArray(v)){out.push(path+' not a list');return out}
+    if(sch.items)for(let i=0;i<v.length&&out.length<8;i++)schemaErrors(sch.items,v[i],path+'['+i+']',out);}
+  else if(t==='string'){if(typeof v!=='string')out.push(path+' not text')}
+  else if(t==='integer'){if(!Number.isInteger(v))out.push(path+' not an integer')}
+  else if(t==='number'){if(typeof v!=='number')out.push(path+' not a number')}
+  else if(t==='boolean'){if(typeof v!=='boolean')out.push(path+' not true/false')}
+  return out}
+// r29k (review finding 3): the WHOLE tool schema, recursively — required
+// properties at every level, item types, enums. Unknown extra properties are
+// tolerated (the schema is not strict-compiled at the API); missing/mistyped/
+// out-of-enum values are not.
+function toolResultError(tool,out){
+  if(!out||typeof out!=='object'||Array.isArray(out))return 'the '+tool.name+' result is not an object';
+  const errs=schemaErrors((tool&&tool.input_schema)||{},out,'result',[]);
+  if(errs.length)return 'the '+tool.name+' result is malformed — '+errs.slice(0,5).join('; ')+(errs.length>5?'; …':'');
+  for(const k of (NONEMPTY_SECTIONS[tool.name]||[]))if(!Array.isArray(out[k])||!out[k].length)return 'the '+tool.name+' result has an EMPTY '+k+' — the audit compared nothing';
+  return null}
 const fileB64=f=>new Promise((res,rej)=>{const r=new FileReader();
   r.onload=()=>res(String(r.result).slice(String(r.result).indexOf(',')+1));r.onerror=()=>rej(r.error);r.readAsDataURL(f)});
 const pdfBlock=b64=>({type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}});
@@ -716,6 +890,68 @@ function contentBlockFor(doc){const n=doc.name.toLowerCase();
   if(n.endsWith('.jpg')||n.endsWith('.jpeg'))return {type:'image',source:{type:'base64',media_type:'image/jpeg',data:doc.b64}};
   if(n.endsWith('.webp'))return {type:'image',source:{type:'base64',media_type:'image/webp',data:doc.b64}};
   return pdfBlock(doc.b64);}
+// r29j (audit 2026-09-06 F03): DOCUMENT FINGERPRINTS. Every document on file
+// carries fp — a deterministic digest of its bytes (two independent 32-bit
+// passes + length; change detection, not cryptography). Every audit report
+// binds to the fingerprints of the exact documents it read: captured at call
+// START, re-checked at completion (a result whose inputs changed during the
+// call is DISCARDED), and compared again at the sign-off gate. A document
+// replaced/added/removed after an audit RETIRES that report and opens an
+// amendment item that closes itself when the audit re-runs.
+function docFp(b64){const s=String(b64||'');let h1=0x811c9dc5,h2=5381;
+  for(let i=0;i<s.length;i++){const c=s.charCodeAt(i);h1=Math.imul(h1^c,16777619)>>>0;h2=(Math.imul(h2,33)^c)>>>0;}
+  return (h1>>>0).toString(16).padStart(8,'0')+(h2>>>0).toString(16).padStart(8,'0')+'-'+s.length.toString(16)}
+// r29k (review finding 5): the fingerprint is recomputed from the bytes on
+// every snapshot — a cached d.fp is never trusted. A small content-keyed
+// cache (the b64 string itself is the key, so a changed string misses)
+// keeps repeated snapshots of unchanged documents O(1).
+const FP_CACHE=new Map();
+function fpOf(b64){const s=String(b64||'');let v=FP_CACHE.get(s);if(v)return v;v=docFp(s);
+  if(FP_CACHE.size>=48)FP_CACHE.delete(FP_CACHE.keys().next().value);FP_CACHE.set(s,v);return v}
+function stampFp(d){if(d&&typeof d==='object'&&d.b64!==undefined)d.fp=fpOf(d.b64);return d}
+function docSnapshot(docs){docs=docs||{};const o={};
+  for(const k of ['po','traveler','print','coc','packSlip']){const d=docs[k];if(d&&d.b64!==undefined)o[k]=stampFp(d).fp}
+  const L=labelDocs(docs);if(L.length)o.labels=L.map(d=>stampFp(d).fp);
+  return o}
+const REPORT_INPUTS={SCR2:['po','traveler','print'],FI:['po','coc','packSlip','traveler','labels']};
+function inputsFor(stage,docs){const snap=docSnapshot(docs);const o={};for(const k of REPORT_INPUTS[stage]||[]){if(snap[k]!==undefined)o[k]=snap[k]}return o}
+const inputsMatch=(a,b)=>JSON.stringify(a||null)===JSON.stringify(b||null);
+function reportFor(stage,job){job=job||S;return stage==='SCR2'?job.scr2Report:stage==='FI'?job.fiReport:null}
+// a report whose recorded inputs differ from the documents on file NOW
+function reportStale(stage,job){job=job||S;const rep=reportFor(stage,job);if(!rep)return false;
+  if(!rep.inputs||rep.unbound)return true; // unbound: cannot prove which documents it audited
+  return !inputsMatch(rep.inputs,inputsFor(stage,job.docs))}
+function docChanged(job,slot,before){job=job||S;const after=docSnapshot(job.docs);
+  if(JSON.stringify(before[slot]===undefined?null:before[slot])===JSON.stringify(after[slot]===undefined?null:after[slot]))return false;
+  const hit=[];const at=new Date().toISOString();
+  for(const st of ['SCR2','FI']){const rep=reportFor(st,job);if(!rep||!REPORT_INPUTS[st].includes(slot))continue;
+    (job.retiredReports=job.retiredReports||[]).push({stage:st,retiredAt:at,reason:'document changed: '+slot,report:rep}); // the FULL report, as history
+    if(st==='SCR2')job.scr2Report=null;else{job.fiReport=null;job.checklist={};delete job.qtyCheck;}
+    hit.push(st)}
+  if(!hit.length)return false;
+  const lab=(SLOT_LABEL[slot]||slot).toUpperCase();
+  // r29k (review finding 6): ONE item PER retired stage. The current stage's
+  // item closes itself when THAT audit re-runs; a stage already signed off
+  // has no re-run path — its item needs a human structured resolution with
+  // evidence (it says so). Nothing closes on another stage's re-run.
+  for(const st of hit){
+    const signedOff=(job.signoffs||[]).some(s=>s.stage===st);
+    const open=(job.ledger||[]).find(i=>i.kind==='doc-change'&&i.slot===slot&&i.stage===st&&(i.state||'OPEN')==='OPEN');
+    if(open){lAudit(open,'DOCUMENT CHANGED AGAIN — '+lab,RV.ini||'',st+' report retired again');continue}
+    job.ledger.push({id:nextLedgerId('amend-',job),kind:'doc-change',deterministic:true,slot,stage:st,stages:[st],needsHuman:signedOff,
+      label:'DOCUMENT CHANGED AFTER '+st+' AUDIT — '+lab,cls:'HOLD',gate:st==='SCR2'&&job.stage==='SCR2'?'SCR':'FINAL INSPECTION',tier:1,
+      act:signedOff
+        ?'The '+st+' stage is already signed off, so its audit cannot be re-run here. Record the outcome with evidence (what was checked against the new '+(SLOT_LABEL[slot]||slot)+' and by whom) — this item does NOT close on its own.'
+        :'Re-run the '+st+' audit on the documents now on file. This item closes itself when that re-run completes.',
+      why:'The '+(SLOT_LABEL[slot]||slot)+' on file changed after the '+st+' audit read it. The previous '+st+' report described documents no longer on this job, so it was retired ('+at.slice(0,16).replace('T',' ')+').',
+      from:'DOC-CHANGE',state:'OPEN',res:null,audit:[]});}
+  toast('⚠ '+lab+' changed — the '+hit.join(' and ')+' report'+(hit.length>1?'s were':' was')+' retired; re-run the audit');
+  return true}
+// the re-run completed on the current documents: ONLY that stage's amendment items close, audited
+function closeDocChangeItems(job,stage,inputs){for(const i of job.ledger||[]){
+  if(i.kind!=='doc-change'||(i.state||'OPEN')!=='OPEN'||i.stage!==stage)continue;
+  i.state='RESOLVED';i.res={outcome:'RE-AUDITED',note:stage+' audit re-run on the current documents',src:'INPUTS: '+JSON.stringify(inputs),by:RV.ini||'',date:today()};
+  lAudit(i,'RESOLVED — RE-AUDITED ('+stage+')',RV.ini||'','report bound to '+JSON.stringify(inputs))}}
 function b64bytes(b64){const bin=atob(b64);const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return u}
 
 // docx → text, in-browser (zip parse + DecompressionStream)
@@ -764,6 +1000,9 @@ function metricsLine(){const M=S&&S.metrics;if(!M)return '';
   const parts=Object.entries(M.stages).map(([k,s])=>(STAGE_NAME[k]||k)+' '+Math.round(s.ms/1000)+'s · $'+s.cost.toFixed(2)+(s.runs>1?' ('+s.runs+' runs)':''));
   return `<p class="hint" style="margin:2px 0">\u23f1 ${parts.join(' | ')} \u2014 job cost so far $${(M.totalCost||0).toFixed(2)}</p>`}
 function buildJobFromRaw(raw,fname,b64){
+  // r30c: FAIL CLOSED — a missing/empty field block is a tooling failure, not a PO with blanks
+  if(!raw||typeof raw!=='object'||!raw.wo||typeof raw.wo!=='object'||!Object.keys(raw.wo).length){
+    throw new Error('Extraction returned no field block (tool input keys: '+JSON.stringify(Object.keys(raw||{}))+') — nothing was recorded. Re-run this PO.');}
   const job=freshInstance();job.docs.po={name:fname,b64};
   const fields=[];
   for(const d of DATA.scr1.woDefs){
@@ -905,7 +1144,7 @@ function buildJobFromRaw(raw,fname,b64){
 // UNRESOLVED. Shadow results NEVER block, create, or change a gate, and
 // never weaken a HOLD. Same-vendor agreement is NEVER "independently
 // verified" — it is SHADOW / MEASUREMENT ONLY.
-const PILOT={primary:'claude-opus-4-8',verifier:'claude-sonnet-5',
+const PILOT={primary:PRIMARY_MODEL,verifier:'claude-sonnet-5', // r30: Opus 5 primary, Sonnet 5 verifier (Tyler 2026-08-10)
   verifierTimeoutMs:240000}; // r25b: hard verifier deadline (4 min) — a hung verifier degrades to AUDIT NOT PERFORMED, never a wedged SCR1
 async function scr1Dual(content,label,call){ // `call` injectable so acceptance tests drive the REAL orchestration with fake models
   call=call||callClaude;
@@ -1273,19 +1512,29 @@ function b2MatchTraveler(fileName,items){const wo=b2WoFromName(fileName);
   return{ok:true,item:targets[0],wo}}
 // §5.1b post-read identity check: the traveler the MODEL read must report
 // this job's WO/customer — a mismatch is ERROR and applies NO ledger changes
+// r29j (audit 2026-09-06 F09): the traveler's WO must equal this job's WO
+// WHOLE (canonical 5 digits + optional WA/RW suffix) after stripping a label
+// prefix — a substring match let "99999-WRONG" pass as 99999. A traveler
+// that reports NO WO row (or an unreadable one) is UNRESOLVED: identity is
+// not confirmed and no ledger changes apply. Customer: whole normalized
+// name containment either way (corporate suffixes ignored), never one token.
+function canonWo(s){const m=String(s||'').toUpperCase().replace(/^\s*(W\.?\s*O\.?|WORK\s*ORDER|JOB)?\s*(#|NO\.?|NUMBER|:)?\s*/,'').trim().match(/^(\d{5})\s*-?\s*(WA|RW)?$/);
+  return m?m[1]+(m[2]||''):null}
+function canonCust(s){return String(s||'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').replace(/\b(INC|INCORPORATED|LLC|CORP|CORPORATION|CO|LTD|LIMITED|COMPANY|THE)\b/g,' ').replace(/\s+/g,' ').trim()}
 function b2IdentityCheck(job){const rows=(job.scr2Report&&job.scr2Report.travelerComparison)||[];
-  const find=re=>rows.find(r=>re.test(String(r.field||'')));
+  const find=re=>rows.find(r=>re.test(String(r.field||'')));const probs=[];
   const woRow=find(/\bWO\b|WORK\s*ORDER/i);
-  if(woRow&&woRow.travelerValue&&!/UNCLEAR|NOT_ON/i.test(String(woRow.status||''))){
-    if(norm(woRow.travelerValue).indexOf(norm(job.wo))<0)
-      return 'traveler reports WO "'+woRow.travelerValue+'" but this instance is WO '+job.wo}
+  if(!woRow||!String(woRow.travelerValue||'').trim())probs.push('identity UNRESOLVED — the audit reported no work-order row for the traveler; this job is WO '+job.wo+' and the traveler was not confirmed to be its traveler');
+  else if(/UNCLEAR|NOT_ON/i.test(String(woRow.status||'')))probs.push('identity UNRESOLVED — the traveler\'s work order was reported '+String(woRow.status).toUpperCase()+'; this job is WO '+job.wo);
+  else if(canonWo(woRow.travelerValue)!==canonWo(job.wo))probs.push('traveler reports WO "'+woRow.travelerValue+'" but this instance is WO '+job.wo);
   const cRow=find(/CUSTOMER/i);
-  if(cRow&&cRow.travelerValue&&!/UNCLEAR|NOT_ON/i.test(String(cRow.status||''))){
-    const rep=norm(cRow.travelerValue);
-    const tok=String(job.customer||'').toUpperCase().replace(/[^A-Z0-9 ]/g,' ').split(/\s+/).filter(w=>w.length>=4)[0];
-    if(tok&&rep&&rep.indexOf(norm(tok))<0)
-      return 'traveler reports customer "'+cRow.travelerValue+'" but this instance is '+job.customer}
-  return null}
+  if(!cRow||!String(cRow.travelerValue||'').trim())probs.push('identity UNRESOLVED — the audit reported no customer row for the traveler; this job is '+job.customer);
+  else if(/UNCLEAR|NOT_ON/i.test(String(cRow.status||'')))probs.push('identity UNRESOLVED — the traveler\'s customer was reported '+String(cRow.status).toUpperCase()+'; this job is '+job.customer);
+  else{const rep=canonCust(cRow.travelerValue),inst=canonCust(job.customer);
+    const shorter=rep.length<=inst.length?rep:inst,longer=shorter===rep?inst:rep;
+    if(!rep||!inst||shorter.length<4||!(' '+longer+' ').includes(' '+shorter+' '))
+      probs.push('traveler reports customer "'+cRow.travelerValue+'" but this instance is '+job.customer)}
+  return probs.length?probs.join('; '):null}
 // IndexedDB persistence (resume after refresh — 15 embedded-doc jobs exceed localStorage)
 function b2Db(){return new Promise((res,rej)=>{const q=indexedDB.open('fscr-batch2',1);
   q.onupgradeneeded=()=>q.result.createObjectStore('kv');
@@ -1330,9 +1579,10 @@ window.b2LoadInstances=inp=>{let fs=[...inp.files];inp.value='';if(!fs.length)re
   fs.forEach(f=>{const r=new FileReader();
     r.onload=()=>{let o=null,err=null;
       try{o=JSON.parse(r.result)}catch(e){err='not JSON: '+e.message}
-      const v=err?{ok:false,reason:err}:b2ValidateInstance(o,f.name,BATCH2.items);
+      let v=err?{ok:false,reason:err}:b2ValidateInstance(o,f.name,BATCH2.items);
+      if(v.ok){const badIds=validateImported(o);if(badIds.length)v={ok:false,reason:'not a well-formed FSCR instance ('+badIds.slice(0,3).join('; ')+')'}} // r29j F04: same import boundary as loadFile
       if(!v.ok){BATCH2.refused.push({name:f.name,kind:'instance',reason:v.reason})}
-      else{migrateInstance(o,today());ensurePriceItem(o);featureMigrate(o);
+      else{migrateInstance(o,today());ensurePriceItem(o);featureMigrate(o);refingerprint(o);
         BATCH2.items.push({id:'b2-'+o.wo,name:f.name,job:o,traveler:null,status:'NEEDS-TRAVELER',error:null,ms:0,cost:0})}
       done++;finish()};
     r.onerror=()=>{BATCH2.refused.push({name:f.name,kind:'instance',reason:'file unreadable'});done++;finish()};
@@ -1426,7 +1676,7 @@ function viewBatch2(){
       ${badge(it.status)}
       ${it.ms?`<span class="hint">${Math.round(it.ms/1000)}s · $${(it.cost||0).toFixed(2)}</span>`:''}
       ${it.error?`<span class="hint" style="color:var(--bad);flex-basis:100%">${esc(it.error)}</span>`:''}
-      <button onclick="b2Open('${escA(it.job.wo)}')">Open</button>
+      <button onclick="b2Open(${escJS(it.job.wo)})">Open</button>
     </div>`).join('')||'<p class="note">No instances loaded yet.</p>'}
     ${B.refused.length?`<details style="margin-top:8px" open><summary class="hint" style="color:var(--bad)">⚠ ${B.refused.length} document${B.refused.length===1?'':'s'} REFUSED (never guessed)</summary>
       ${B.refused.map(r=>`<div class="hint" style="color:var(--bad)">✖ ${esc(r.name)} — ${esc(r.reason)}</div>`).join('')}</details>`:''}
@@ -1481,22 +1731,25 @@ window.saveField=(k,btn)=>{const ta=btn.parentElement.querySelector('textarea');
   toast('✎ Field edited — re-verify before copy ('+RV.ini+')')};
 window.submitDoc=async(slot,btn)=>{const f=PENDING[slot];if(!f)return;
   btn.disabled=true;btn.textContent='Uploading…';
+  const before=docSnapshot(S.docs); // r29j F03
   try{
     if(slot==='labels'){
       const staged=Array.isArray(f)?f:[f];
       const added=await Promise.all(staged.map(async x=>({name:x.name,b64:await fileB64(x)})));
       const all=[...labelDocs(),...added];
-      S.docs.labels=all.filter((x,i,a)=>a.findIndex(y=>y.name===x.name&&y.b64===x.b64)===i);
+      S.docs.labels=all.filter((x,i,a)=>a.findIndex(y=>y.name===x.name&&y.b64===x.b64)===i).map(stampFp);
       toast('✓ '+added.length+' label file'+(added.length===1?'':'s')+' added — '+S.docs.labels.length+' total');
     }else{
-      S.docs[slot]={name:f.name,b64:await fileB64(f)};
+      S.docs[slot]=stampFp({name:f.name,b64:await fileB64(f)});
       toast('✓ '+(SLOT_LABEL[slot]||slot)+' uploaded — '+f.name);
     }
+    docChanged(S,slot,before);
     delete PENDING[slot];persistDraft();render();
   }catch(e){btn.disabled=false;btn.textContent='Submit upload';alert('Could not read the file: '+e.message)}};
 window.removeLabelDoc=i=>{const a=labelDocs();const d=a[i];if(!d)return;
   if(!confirm('Remove label file "'+d.name+'" from this instance?'))return;
-  a.splice(i,1);S.docs.labels=a.length?a:undefined;persistDraft();render();toast('Removed label file — '+d.name)};
+  const before=docSnapshot(S.docs); // r29j F03
+  a.splice(i,1);S.docs.labels=a.length?a:undefined;docChanged(S,'labels',before);persistDraft();render();toast('Removed label file — '+d.name)};
 window.uploadDoc=async(inp,slot)=>{window.stageDoc(inp,slot)};
 
 // r21 (§5.1b architecture ruling): the SCR2 audit + mapping path takes an
@@ -1508,9 +1761,12 @@ async function runScr2For(job){
     {type:'text',text:'DOCUMENT 2 — COMPLETED TRAVELER (TRAVELER v1, audit subject):'},contentBlockFor(D.traveler)];
   if(D.print){content.push({type:'text',text:'DOCUMENT 3 — PART PRINT (PRINT v1) — CROSS-REFERENCE ONLY, never authority:'},contentBlockFor(D.print));}
   content.push({type:'text',text:'Audit the traveler against the PO. Read every page. Call emit_scr2 exactly once.'});
+  const inputs=inputsFor('SCR2',D); // r29j F03: bound at call START
   const raw=await callClaude(DATA.scr2.system,DATA.scr2.tool,content,'SCR2 audit — '+(job.wo||job.po||''));addStageMetrics(job,'SCR2');
+  if(!inputsMatch(inputs,inputsFor('SCR2',job.docs)))throw new Error('the documents on this job changed while the SCR2 audit was running — the result was DISCARDED (it describes documents no longer on file). Re-run the audit.');
   job.scr2Report={travelerComparison:raw.travelerComparison||[],
-    summary:raw.summary||'',analyzedAt:new Date().toISOString()};
+    summary:raw.summary||'',analyzedAt:new Date().toISOString(),inputs};
+  closeDocChangeItems(job,'SCR2',inputs);
   const seenNew=new Set(); // within-response exact-fingerprint dedupe only
   (raw.discrepancies||[]).forEach((d,ix)=>{
     if(bareCertSuppressed(d))return; // r20b correction 6: bare standard C-of-C never becomes a ledger item
@@ -1567,11 +1823,14 @@ window.runFi=async()=>{
       content.push({type:'text',text:'DOCUMENT 5 — GENERATED LABELS: NONE PROVIDED. Labels were declared NOT REQUIRED for this WO (declaration recorded at '+(la.declaredAt||'SCR2')+' by '+la.by+' on '+(la.at||'').slice(0,10)+' — reason: '+la.reason+'). Do NOT raise findings about missing labels or label coverage: return labels as an empty array and labelCoverage with all four arrays empty, and leave the labels column of the traceability matrix blank. Run every other check (COC verbatim vs PO, pack slip vs traveler + PO, traceability across the available documents) exactly as normal.'});
     }
     content.push({type:'text',text:'Audit the COC draft, pack slip, and labels (and traceability across all documents) against the PO. Call emit_final_inspection exactly once.'});
+    const inputs=inputsFor('FI',D); // r29j F03: bound at call START
     const raw=await callClaude(DATA.fi.system,DATA.fi.tool,content,'Final Inspection audit');addStageMetrics(S,'FI');
-    S.fiReport={cocChecks:raw.cocChecks||[],packSlipChecks:raw.packSlipChecks||[],
+    if(!inputsMatch(inputs,inputsFor('FI',S.docs)))throw new Error('the documents on this job changed while the Final Inspection audit was running — the result was DISCARDED (it describes documents no longer on file). Re-run the audit.');
+    S.fiReport={inputs,cocChecks:raw.cocChecks||[],packSlipChecks:raw.packSlipChecks||[],
       labels:raw.labels||[],labelCoverage:raw.labelCoverage||{expectedUnits:[],labeledUnits:[],missing:[],extra:[]},
       traceability:(raw.traceability||[]).map(r=>({...r,consistent:r.consistent==='YES'})),
       summary:raw.summary||'',analyzedAt:new Date().toISOString()};
+    closeDocChangeItems(S,'FI',inputs);
     const seenNew=new Set(); // within-response exact-fingerprint dedupe only
     (raw.discrepancies||[]).forEach((d,ix)=>{
       if(bareCertSuppressed(d))return; // r20b correction 6: bare standard C-of-C never becomes a ledger item
@@ -1901,7 +2160,7 @@ function f079IseLine(i){
   if(r.state==='LISTED_NO_CURRENT')return `<span class="act" style="color:var(--warn)">F079 LISTED — CURRENT REV NOT RECORDED (${esc(r.entry.spec)}); VERIFY CONTROLLED SOURCE.</span>`;
   if(r.state==='NO_REV'||r.state==='NOSPEC'||r.state==='UNAVAILABLE')return '';
   if(r.state==='CURRENT')return `<span class="act" style="color:var(--ok)">F079 CURRENT MATCH — ${esc(r.entry.spec)} REV ${esc(r.rev)} is the most recent approved revision. Human acceptance + provenance still required.
-    <button data-src="${escA('F079: '+r.entry.spec+' REV '+r.rev+' (source sha256 '+String((F079.source||{}).sha256||'')+', compiled '+String((F079.source||{}).compiledAt||'')+')')}" onclick="f079Prefill('${i.id}',this)">Prefill provenance</button></span>`;
+    <button data-src="${escA('F079: '+r.entry.spec+' REV '+r.rev+' (source sha256 '+String((F079.source||{}).sha256||'')+', compiled '+String((F079.source||{}).compiledAt||'')+')')}" onclick="f079Prefill(${escJS(i.id)},this)">Prefill provenance</button></span>`;
   if(r.state==='HISTORICAL')return `<span class="act" style="color:var(--warn)">F079: HISTORICAL REV — NOT CURRENT (REV ${esc(r.rev)} was previously observed; most recent is ${esc(r.entry.mostRecent)}). VERIFY CONTROLLED SOURCE — never auto-accepted.</span>`;
   return `<span class="act hint">F079: REV ${esc(r.rev)} NOT FOUND for ${esc(r.entry.spec)} (most recent: ${esc(r.entry.mostRecent)}) — VERIFY F079.</span>`;
 }
@@ -2126,7 +2385,12 @@ const PRICE_FUTURE=/(SCR\s*-?\s*[12]\b|TO\s+VERIFY|WILL\s+VERIFY|VERIF\w*\s+LATE
 // while the normalized copy stripped the "/" so a real "N/A" sailed through
 // (44082). The check now also runs on the RAW string, where the slash
 // survives. Raw+normalized double test is strict-only (reject-more).
-const MAT_UNCERTAIN=/(UNKNOWN|NOT\s+KNOWN|UN-?\s?IDENTIFIED|NOT\s+IDENTIFI|CANN?OT\s+IDENTIFY|COULD\s+NOT\s+IDENTIFY|CAN\s*'?T\s+(TELL|IDENTIFY)|UNSURE|UNCERTAIN|\bTBD\b|PENDING|NEEDS?\s+TEST|WILL\s+CONFIRM|\bLATER\b|\bN\/?A\b|\bVARIOUS\b|\bMISC\b|\bMIXED\b|\bASSORTED\b|\bMULTIPLE\b|\bSEVERAL\b|\?)/i;
+// r29j (audit 2026-09-06 F01 — audit counterexamples verbatim: NOT APPLICABLE,
+// UNDETERMINED, UNIDENTIFIED, WIDGETS): more non-answers refused. This is a
+// DENY-LIST and stays TEMPORARY MITIGATION — it cannot prove a word IS a
+// material (FOOBAR still passes). The positive mechanism (bounded vocabulary
+// + a controlled verify-and-add path) is a design decision awaiting Tyler.
+const MAT_UNCERTAIN=/(NOT\s+APPLIC|UNDETERMIN|NOT\s+DETERMIN|UNSPECIFI|NOT\s+SPECIFI|NOT\s+PROVIDED|NOT\s+GIVEN|NOT\s+STATED|NOT\s+LISTED|NOT\s+AVAILABLE|UNAVAILABLE|NOT\s+SURE|DON'?T\s+KNOW|\bIDK\b|\bTBA\b|\bTBC\b|\bNONE\b|\bNIL\b|\bNULL\b|NO\s+MATERIAL|NOT\s+ON\s+(THE\s+)?PO|UNKNOWN|NOT\s+KNOWN|UN-?\s?IDENTIFIED|NOT\s+IDENTIFI|CANN?OT\s+IDENTIFY|COULD\s+NOT\s+IDENTIFY|CAN\s*'?T\s+(TELL|IDENTIFY)|UNSURE|UNCERTAIN|\bTBD\b|PENDING|NEEDS?\s+TEST|WILL\s+CONFIRM|\bLATER\b|\bN\/?A\b|\bVARIOUS\b|\bMISC\b|\bMIXED\b|\bASSORTED\b|\bMULTIPLE\b|\bSEVERAL\b|\?)/i;
 // r26d (audit P0-2) + r26g (audit): the non-answer rule is TOKEN-BASED —
 // pure reference numbers (43892, 060010276) are IGNORED, and the remaining
 // alphabetic/material-bearing tokens must include at least one word outside
@@ -2144,7 +2408,11 @@ const MAT_WORD_SET=new Set(('VERIFIED CONFIRMED CHECKED INSPECTED IDENTIFIED COM
   +'RECEIVING INSPECTION QC QUALITY CUSTOMER PRINT PART PRIOR HISTORY TRAVELER DRAWING DWG RECORD RECORDS RECORDED '
   +'SOURCE EMAIL PHONE CALL NOTE SEE FROM PER BY AT ON IN THE AND WO PO OTHER '
   +'SUPPLIED DOCS DOC DOCUMENT DOCUMENTS PAPERWORK CERTS '
-  +'TANKS PARTS WIRE HARNESS AS FOUND ATTACHED PROVIDED').split(' '));
+  +'TANKS PARTS WIRE HARNESS AS FOUND ATTACHED PROVIDED '
+  // r29j F01: product / generic nouns — what the parts are AS THINGS, never what they are made of
+  +'WIDGET WIDGETS ITEM ITEMS THING THINGS STUFF MATERIAL MATERIALS UNIT UNITS PIECE PIECES PCS PC EA EACH '
+  +'ASSEMBLY ASSEMBLIES ASSY COMPONENT COMPONENTS HARDWARE FITTING FITTINGS VALVE VALVES BRACKET BRACKETS HOUSING HOUSINGS '
+  +'PRODUCT PRODUCTS GOODS SAMPLE SAMPLES LOT BATCH KIT KITS').split(' '));
 // r28b (07-28 harvest P0): a TYPO of a source word ("INSEPCTIN") must not
 // masquerade as a material name. Near-miss check REJECTS bearing tokens
 // within small edit distance of a long source word — strict-only: this can
@@ -2423,9 +2691,9 @@ function ledgerCard(i,showResolve){
     :`<span class="badge ${p.state==='STOP_NOW'?'b-hold':p.state==='INFORMATION'||p.state==='MEASUREMENT_ONLY'?'b-navy':'b-alert'}">${stateBadgeText(p)}</span>`;
   const outcomes=(i.kind==='price')?['PRICE VERIFIED']:(i.kind==='material-id')?['MATERIAL IDENTIFIED']:(i.ise?L_OUTCOMES.concat(['INTERNAL CONTROLLED SOURCE']):L_OUTCOMES);
   return `<div class="issue ${st==='RESOLVED'?'res':i.cls==='HOLD'?'hold':'alert'}">
-    ${badge}${i.legacyUnaudited?' <span class="badge b-alert">LEGACY — UNAUDITED</span>':''}${(i.carried&&i.carried.length)?` <span class="badge b-navy">${i.carried[i.carried.length-1].specialized?'SPECIALIZED BY EVIDENCED RESTATEMENT':'PREVIOUSLY DISPOSITIONED — CARRIED FORWARD'} (${esc(i.carried[i.carried.length-1].stage)})</span>`:''}${(i.parks||[]).map(p=>` <span class="badge b-navy" title="Park flag — audited; never closes the item, never changes when it is due">\u23f8 ${esc(p.kind)} REQUESTED — ${p.name?esc(p.name)+' · ':''}${esc(p.by)} ${p.date}${st!=='RESOLVED'&&showResolve?` <a href="#" style="color:inherit" title="Clear this park flag (audited)" onclick="clearPark('${i.id}','${p.kind}');return false">✕</a>`:''}</span>`).join('')}
+    ${badge}${i.legacyUnaudited?' <span class="badge b-alert">LEGACY — UNAUDITED</span>':''}${(i.carried&&i.carried.length)?` <span class="badge b-navy">${i.carried[i.carried.length-1].specialized?'SPECIALIZED BY EVIDENCED RESTATEMENT':'PREVIOUSLY DISPOSITIONED — CARRIED FORWARD'} (${esc(i.carried[i.carried.length-1].stage)})</span>`:''}${(i.parks||[]).map(p=>` <span class="badge b-navy" title="Park flag — audited; never closes the item, never changes when it is due">\u23f8 ${esc(p.kind)} REQUESTED — ${p.name?esc(p.name)+' · ':''}${esc(p.by)} ${esc(p.date)}${st!=='RESOLVED'&&showResolve?` <a href="#" style="color:inherit" title="Clear this park flag (audited)" onclick="clearPark(${escJS(i.id)},${escJS(p.kind)});return false">✕</a>`:''}</span>`).join('')}
     <span class="lab">${esc(i.label)}</span>
-    <span class="meta">${st==='RESOLVED'?`${esc(i.res.outcome||'')} · ${esc(i.res.by)} · ${i.res.date} · ${esc(i.res.note)}${i.res.src?' · source: '+esc(i.res.src):''}${i.adjud?' · feedback: '+esc(i.adjud.validity)+(i.adjud.value?' / '+esc(i.adjud.value):''):''}`
+    <span class="meta">${st==='RESOLVED'?`${esc(i.res.outcome||'')} · ${esc(i.res.by)} · ${esc(i.res.date)} · ${esc(i.res.note)}${i.res.src?' · source: '+esc(i.res.src):''}${i.adjud?' · feedback: '+esc(i.adjud.validity)+(i.adjud.value?' / '+esc(i.adjud.value):''):''}`
       :st==='OVERRIDDEN'?(i.kind==='material-id'
         ?`proceed at risk: authorized by ${esc(i.override?.approver||'')} · ref ${esc(i.override?.aref||'')} · ${esc((i.override?.at||'').slice(0,10))} · recorded by ${esc(i.override?.by||'')} · ${esc(i.override?.reason||'')} — material still unconfirmed; the job cannot close until it is identified`
         :`exception: ${esc(i.override?.approver||'')} · Access ref ${esc(i.override?.accessRef||'')} · ${esc((i.override?.at||'').slice(0,10))} · recorded by ${esc(i.override?.by||'')} — verification still outstanding`)
@@ -2441,11 +2709,11 @@ function ledgerCard(i,showResolve){
     ${i.ise&&st!=='RESOLVED'?`<span class="act" style="color:var(--gold-deep)">PO is silent on this value — acceptable ONLY as an internal controlled source with recorded provenance (resolve with that outcome), per QPC practice. A PO-stated conflict could never be accepted this way.</span>`:''}
     ${st!=='RESOLVED'&&i.ise?f079IseLine(i):''}
     ${st!=='RESOLVED'?f079PoLine(i):''}
-    ${(i.notes&&i.notes.length)?i.notes.map(n=>`<span class="act" style="color:var(--gold-deep)">📝 ${esc(n.note)} — ${esc(n.by)} ${n.date}</span>`).join(''):''}
+    ${(i.notes&&i.notes.length)?i.notes.map(n=>`<span class="act" style="color:var(--gold-deep)">📝 ${esc(n.note)} — ${esc(n.by)} ${esc(n.date)}</span>`).join(''):''}
     ${(i.audit&&i.audit.length)?`<details style="font-size:10px;margin-top:2px"><summary class="hint">history (${i.audit.length})</summary>${i.audit.map(a=>`<div class="hint">${esc((a.at||'').slice(0,16).replace('T',' '))} · ${esc(a.what)} — ${esc(a.by||'')}${a.detail?' · '+esc(a.detail):''}</div>`).join('')}</details>`:''}
     ${st!=='RESOLVED'&&showResolve?`<div class="rform"><input placeholder="Add a note — never changes the state; carries forward (context, print findings, partial info)">
       <input class="ini" placeholder="Initials" value="${escA(RV.ini)}">
-      <button onclick="addLNote('${i.id}',this)">📝 Note (state unchanged)</button></div>`:''}
+      <button onclick="addLNote(${escJS(i.id)},this)">📝 Note (state unchanged)</button></div>`:''}
     ${actionable&&showResolve?`<div class="rform"><select>${outcomes.map(o=>`<option>${o}</option>`).join('')}</select>
       ${(i.kind!=='price'&&i.kind!=='material-id'&&!i.deterministic)?`<select class="fq" title="Optional feedback — one question (Tyler's r27 ruling; replaces the two-value controls)"><option value="">— was this finding right? (optional) —</option><option>CAUGHT A REAL ISSUE</option><option>ALREADY KNOWN / ROUTINE</option><option>NOT AN ISSUE / DUPLICATE</option><option>COULD NOT TELL</option></select>`:''}
       ${i.kind!=='material-id'?`<input class="ev" placeholder="Evidence — what was corrected/verified and where (required; 'done' is rejected)">`:''}
@@ -2456,9 +2724,9 @@ function ledgerCard(i,showResolve){
       <select class="matsrc" onchange="matNoteVis(this)"><option value="">— identification source —</option><option>RECEIVING INSPECTION</option><option>CUSTOMER CONFIRMED</option><option>PART PRINT</option><option>PRIOR WO / HISTORY</option><option>OTHER — RECORD IN NOTE</option></select>
       <input class="matnote" placeholder="Material-source note — where the identification came from (required)" style="width:250px;display:none">`:''}
       <input class="ini" placeholder="Initials" value="${escA(RV.ini)}">
-      <button class="primary" onclick="resolveL('${i.id}',this)">Resolve</button></div>
+      <button class="primary" onclick="resolveL(${escJS(i.id)},this)">Resolve</button></div>
       ${i.kind==='price'&&S.stage==='SCR1'?`<div class="rform"><span class="hint">Default at SCR1 (ruling 2026-07-16): defer — price closes only with a real quote/DB reference.</span>
-      <button onclick="deferPriceToShip('${i.id}')">Defer to SHIP (default)</button></div>`:''}`:''}
+      <button onclick="deferPriceToShip(${escJS(i.id)})">Defer to SHIP (default)</button></div>`:''}`:''}
     ${st!=='RESOLVED'&&st!=='OVERRIDDEN'&&showResolve&&i.kind==='material-id'?`<details class="matov" style="border-top:1px dashed var(--line);padding-top:6px">
       <summary class="hint" style="cursor:pointer">Material cannot be identified?</summary>
       <div class="ovform rform">
@@ -2471,27 +2739,27 @@ function ledgerCard(i,showResolve){
       <input class="esender" placeholder="Email sender — name or address" style="width:190px;display:none">
       <input class="edate" type="date" max="${localToday()}" title="Email date" style="width:150px;display:none">
       <input class="ini" placeholder="Your initials" value="${escA(RV.ini)}">
-      <button onclick="matProceedL('${i.id}',this)">Record PROCEED AT RISK</button></div></details>`:''}
+      <button onclick="matProceedL(${escJS(i.id)},this)">Record PROCEED AT RISK</button></div></details>`:''}
     ${st!=='RESOLVED'&&showResolve&&i.kind==='price'?`<div class="ovform rform" style="border-top:1px dashed var(--line);padding-top:6px">
       <span class="hint" style="flex-basis:100%">Shipment exception (SP0120/G1) — authorization is governed by SP0120/G1, not this tool. The approval must be documented in Access; enter its reference. Shipment is permitted but verification stays open.</span>
       <input class="appr" placeholder="Approver name">
       <input class="ev" placeholder="Approval reason">
       <input class="aref" placeholder="Access record / reference (required)">
       <input class="ini" placeholder="Your initials" value="${escA(RV.ini)}">
-      <button onclick="overrideL('${i.id}',this)">Record shipment exception</button></div>`:''}
+      <button onclick="overrideL(${escJS(i.id)},this)">Record shipment exception</button></div>`:''}
     ${st!=='RESOLVED'&&showResolve&&i.kind==='price'?`<div class="parkform rform" style="border-top:1px dashed var(--line);padding-top:6px">
       <span class="hint" style="flex-basis:100%">Park (audited flags — record who owns the next move; NEVER closes the item or changes when it is due; verification still required to resolve):</span>
       <input class="mgr" placeholder="Manager name (for manager check)">
       <input class="ini" placeholder="Initials" value="${escA(RV.ini)}">
-      <button onclick="addPark('${i.id}','MANAGER CHECK',this)">\u23f8 Manager check requested</button>
-      <button onclick="addPark('${i.id}','REVISED PO',this)">\u23f8 Revised PO requested</button></div>`:''}
+      <button onclick="addPark(${escJS(i.id)},'MANAGER CHECK',this)">\u23f8 Manager check requested</button>
+      <button onclick="addPark(${escJS(i.id)},'REVISED PO',this)">\u23f8 Revised PO requested</button></div>`:''}
     ${actionable&&showResolve&&i.kind!=='material-id'?`<details style="font-size:11px;margin-top:2px"><summary class="hint">Move this task (audited)</summary>
       <div class="rform">${gateSelect(i.deferredTo||i.gate)}
         <input class="ev" placeholder="Reason (required)"><input class="ini" placeholder="Initials" value="${escA(RV.ini)}">
-        <button onclick="deferL('${i.id}',this)">Move to that point (audited)</button></div>
+        <button onclick="deferL(${escJS(i.id)},this)">Move to that point (audited)</button></div>
       <div class="rform">${gateSelect(i.gate)}
         <input class="ev" placeholder="Reason — why was the required point wrong (required)"><input class="ini" placeholder="Initials" value="${escA(RV.ini)}">
-        <button onclick="reassignL('${i.id}',this)">Correct the required point (audited)</button></div></details>`:''}
+        <button onclick="reassignL(${escJS(i.id)},this)">Correct the required point (audited)</button></div></details>`:''}
   </div>`}
 // r27: PASSIVE measurement panel (Tyler's MEASUREMENT ONLY state). One
 // collapsed summary; details show plain field labels and both readings with
@@ -2555,24 +2823,30 @@ window.gateSCR1=()=>{if(needRv())return;
   if(unanswered.length){alert('Answer the one-question feedback on your '+unanswered.length+' edited field(s) first: did the parser misread the PO, or was the edit your entry preference?');return}
   S.fb=S.fb||{};for(const f of S.scr1.fields){if(!S.fb[f.k]&&!f.editedBy&&!f.entry){S.fb[f.k]={ext:'CORRECT',xf:'ACCEPTED',auto:true,at:today()}}}
   S.wo=wo.toUpperCase();S.signoffs.push({stage:'SCR1',name:RV.name,ini:RV.ini,date:today()});S.stage='SCR2';
-  saveInstance();render()};
+  if(saveInstance()===null){persistDraft();render();return} // r29k: the sign-off stands in this tab and its recovery draft; the FILE does not exist yet — Save again
+  render()};
 window.gateSCR2=()=>{if(needRv())return;
   if(S.woInvalid){alert('Refused: this instance carries an invalid WO number ("'+String(S.wo).slice(0,40)+'…"). Correct it from Access (banner above) before sign-off.');return}
   const clash=distinct(RV.ini,RV.name);
   if(clash){alert('Refused: the SCR2 reviewer must differ from the '+clash+' reviewer. Independence is a hard rule.');return}
   if(!S.labelAttest){alert('SCR2 sign-off requires either the label attestation (labels GENERATED in Access) or a recorded "this WO requires NO labels" declaration with a reason.');return}
+  if(!S.scr2Report||reportStale('SCR2')){alert('Refused: there is no SCR2 report for the documents now on file (a document changed after the audit, or the audit never completed). Re-run the SCR2 audit.');return} // r29j F02/F03
   const blk2=openBlocking('SCR2');if(blk2.length){alert('Refused: '+blk2.length+' item(s) must be finished before this sign-off.');return}
   S.signoffs.push({stage:'SCR2',name:RV.name,ini:RV.ini,date:today()});S.stage='FI';
-  saveInstance();render()};
+  if(saveInstance()===null){persistDraft();render();return} // r29k
+  render()};
 window.gateFI=()=>{if(needRv())return;
   if(S.advancePo){alert('Refused: this job is marked ADVANCE PO — parts not physically received. Confirm physical receipt (and run SCR2 on any revised PO), turn the Advance-PO mode off, and re-enter the Received Date from Access before closing.');return}
   if(S.woInvalid){alert('Refused: this instance carries an invalid WO number ("'+String(S.wo).slice(0,40)+'…"). Correct it from Access (banner above) before closing.');return}
+  if(!S.fiReport||reportStale('FI')){alert('Refused: there is no Final Inspection report for the documents now on file (a document changed after the audit, or the audit never completed). Re-run the Final Inspection audit.');return} // r29j F02/F03 — checked FIRST: the missing report is the root cause the tech must act on
   if(!S.qtyCheck){alert('Refused: record the quantity verification (expected vs actual physical count) before closing — ruling 2026-07-16.');return}
   const clash=distinct(RV.ini,RV.name);
   if(clash){alert('Refused: the Final Inspection reviewer must differ from the '+clash+' reviewer — three distinct people per job.');return}
   const blkF=openBlocking('FI');if(blkF.length){alert('Refused: '+blkF.length+' item(s) must be finished before closing — resolve them, or (price verification only) record a documented SP0120/G1 shipment exception.');return}
   S.signoffs.push({stage:'FI',name:RV.name,ini:RV.ini,date:today()});S.stage='CLOSED';
-  saveInstance();clearDraft();render()};
+  // r29k (review finding 7): the recovery draft is cleared ONLY after the closure file was actually produced
+  if(saveInstance()===null){persistDraft();render();return}
+  clearDraft();render()};
 // r15 session continuity (top floor friction): move to the next job without
 // refresh / re-key / re-identity. Key stays in tab memory, never exported.
 window.toggleAdvancePo=cb=>{if(cb.checked){if(needRv()){cb.checked=false;return}
@@ -2668,9 +2942,9 @@ function docCard(slot,label,required,accept){
       :pend?`<span class="doc-meta mono">staged: ${esc(pend.name)}</span>`
       :`<span class="doc-meta">${required?'REQUIRED — not uploaded':'not uploaded'}</span>`}
     ${S.stage!=='CLOSED'?(pend
-      ?`<span style="display:flex;gap:6px"><button class="primary" onclick="submitDoc('${slot}',this)">Submit upload</button>
-        <button onclick="cancelStage('${slot}')">Cancel</button></span>`
-      :`<input type="file" accept="${accept}" onchange="stageDoc(this,'${slot}')">`)
+      ?`<span style="display:flex;gap:6px"><button class="primary" onclick="submitDoc(${escJS(slot)},this)">Submit upload</button>
+        <button onclick="cancelStage(${escJS(slot)})">Cancel</button></span>`
+      :`<input type="file" accept="${accept}" onchange="stageDoc(this,${escJS(slot)})">`)
     :''}
   </div>`}
 function saveRow(){return metricsLine()+(isDirty()
@@ -2698,11 +2972,11 @@ window.addCNote=btn=>{if(needRv())return;const inp=btn.parentElement.querySelect
 function cnCard(){const list=S.customerNotes||[];
   return `<div class="card"><b style="font-size:12px">Propose a customer note</b>
     <span class="hint">— tribal knowledge: what is NORMAL for ${esc(S.customer)}. Proposals are QUEUED for controlled review + Access verification only — they do not change this job, the automatic checks, any field, or any finding.</span>
-    ${list.map(n=>`<div class="hint" style="margin-top:4px">📌 ${esc(n.note)} — ${esc(n.by)} ${n.date} (${esc(n.stage)}) <span class="badge b-alert">${esc(n.status||'QUEUED')} — PENDING VERIFICATION — NOT ACTIVE</span></div>`).join('')}
+    ${list.map(n=>`<div class="hint" style="margin-top:4px">📌 ${esc(n.note)} — ${esc(n.by)} ${esc(n.date)} (${esc(n.stage)}) <span class="badge b-alert">${esc(n.status||'QUEUED')} — PENDING VERIFICATION — NOT ACTIVE</span></div>`).join('')}
     ${list.length?`<div class="hint" style="margin-top:2px">Status path: QUEUED → ACCESS VERIFIED → ACTIVE IN PROFILE (or REJECTED). Until ACTIVE, a note never changes any job, check, field, or finding.</div>`:''}
     ${S.stage!=='CLOSED'?`<div class="rform" style="margin-top:6px"><input placeholder="e.g. this customer never sends prints — don't flag it">
     <button onclick="addCNote(this)">Propose note</button></div>`:''}
-    ${(S.missingAdvisories||[]).filter(m=>m.stage===S.stage).map(m=>`<div class="hint" style="margin-top:4px">⚠ missing advisory: ${esc(m.note)} — ${esc(m.by)} ${m.date}</div>`).join('')}
+    ${(S.missingAdvisories||[]).filter(m=>m.stage===S.stage).map(m=>`<div class="hint" style="margin-top:4px">⚠ missing advisory: ${esc(m.note)} — ${esc(m.by)} ${esc(m.date)}</div>`).join('')}
     ${S.stage!=='CLOSED'?`<div class="rform" style="margin-top:6px"><input placeholder="Missing advisory — what SHOULD have been flagged at this stage but wasn't">
     <button onclick="addMissing(this)">Report missing</button></div>`:''}</div>`}
 window.addMissing=btn=>{if(needRv())return;const inp=btn.parentElement.querySelector('input');const t=inp.value.trim();
@@ -2816,23 +3090,23 @@ function viewSCR1(){
   <div class="sec"><h3>DB entry — verify → copy → rate</h3><span class="rule"></span></div>
   <div class="card">
   ${S.scr1.fields.map(f=>(S.verified[f.k]&&!EDITING[f.k]&&!EXPANDED[f.k]&&!done)
-    ?`<div class="field fcol" title="Verified — click to expand" onclick="EXPANDED['${escA(f.k)}']=true;render()">
+    ?`<div class="field fcol" title="Verified — click to expand" onclick="EXPANDED[${escJS(f.k)}]=true;render()">
       <span class="f-label">${esc(f.l)}<small>✓ VERIFIED</small></span>
       <span class="f-val" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(f.v)||'—'}</span></div>`
     :`<div class="field">
-      <span class="f-label">${esc(f.l)}<small>${f.entry?'ENTRY · ACCESS':f.s}${f.editedBy?' · EDITED':''}</small></span>
+      <span class="f-label">${esc(f.l)}<small>${f.entry?'ENTRY · ACCESS':esc(f.s)}${f.editedBy?' · EDITED':''}</small></span>
       ${EDITING[f.k]
         ?`<span><textarea class="f-edit" rows="2">${esc(f.v)}</textarea>
-           <span style="display:flex;gap:6px;margin-top:4px"><button class="primary" onclick="saveField('${escA(f.k)}',this.parentElement.parentElement)">Save</button>
-           <button onclick="cancelEditField('${escA(f.k)}')">Cancel</button></span></span>`
+           <span style="display:flex;gap:6px;margin-top:4px"><button class="primary" onclick="saveField(${escJS(f.k)},this.parentElement.parentElement)">Save</button>
+           <button onclick="cancelEditField(${escJS(f.k)})">Cancel</button></span></span>`
         :`<span class="f-val">${esc(f.v)||'—'}${f.editedBy?`<div class="f-edited">✎ edited by ${esc(f.editedBy)} — parser said: <s>${esc(f.orig??'')||'—'}</s></div>`:''}${f.src!==undefined&&f.src!==f.v?`<div class="hint" style="white-space:pre-wrap;margin-top:2px">PO states: ${esc(f.src)}</div>`:''}</span>`}
       <span class="f-act">${f.entry
         ?`${f.enteredBy?'<span class="hint">✓ recorded</span>':'<span class="hint" style="color:var(--warn)">required before sign-off</span>'}`
         :`<label><input type="checkbox" ${S.verified[f.k]?'checked':''} ${done?'disabled':''}
-        onchange="S.verified['${escA(f.k)}']=this.checked;if(this.checked)delete EXPANDED['${escA(f.k)}'];persistDraft();render()"> verified</label>
-        <button ${copyable(f)&&S.verified[f.k]?'':'disabled'} title="${copyable(f)?'Verify first to enable copy':'No copy for '+f.s}"
+        onchange="S.verified[${escJS(f.k)}]=this.checked;if(this.checked)delete EXPANDED[${escJS(f.k)}];persistDraft();render()"> verified</label>
+        <button ${copyable(f)&&S.verified[f.k]?'':'disabled'} title="${copyable(f)?'Verify first to enable copy':escA('No copy for '+f.s)}"
           onclick="copyVal(this,${JSON.stringify(f.v).replace(/"/g,'&quot;').replace(/</g,'&lt;')})">Copy</button>`}
-        ${!done&&!EDITING[f.k]?`<button title="${f.entry?'Enter the value from the Access receiving record':'Edit the value — the parsed original is kept for the tuning loop'}" onclick="editField('${escA(f.k)}')">${f.entry?'Enter':'✎ Edit'}</button>`:''}</span>
+        ${!done&&!EDITING[f.k]?`<button title="${f.entry?'Enter the value from the Access receiving record':'Edit the value — the parsed original is kept for the tuning loop'}" onclick="editField(${escJS(f.k)})">${f.entry?'Enter':'✎ Edit'}</button>`:''}</span>
       ${(()=>{const fin=S.ledger.find(x=>(x.state||(x.res?'RESOLVED':'OPEN'))!=='RESOLVED'&&x.fieldRefs&&x.fieldRefs.includes(f.k));
         return fin?`<span class="f-why">⚑ finding: ${esc(fin.label)}${f.why?' — '+esc(f.why):''}</span>`:(f.why?`<span class="f-why">Why: ${esc(f.why)}</span>`:'')})()}
       ${fbRow(f)}
@@ -2866,7 +3140,8 @@ function viewSCR1(){
 }
 
 function viewSCR2(){
-  const r=S.scr2Report;const done=S.stage==='FI'||S.stage==='CLOSED';
+  const r=S.scr2Report&&!reportStale('SCR2')?S.scr2Report:null; // r29j F03: a stale report is not a report
+  const done=S.stage==='FI'||S.stage==='CLOSED';
   const blocking=openBlocking('SCR2');
   const s1=S.signoffs.find(s=>s.stage==='SCR1');
   return `${BATCH.items.length&&S?`<div style="margin:14px 0 -6px"><button onclick="backToBatch()">\u2190 Batch queue</button></div>`:''}${b2Has(S)?`<div style="margin:14px 0 -6px"><button onclick="b2Back()">\u2190 Batch SCR2</button></div>`:''}${stagesBar()}${busyBox()}
@@ -2879,7 +3154,7 @@ function viewSCR2(){
   <div class="sec"><h3>What SCR1's parser extracted (rate parse errors you spot)</h3><span class="rule"></span></div>
   <details><summary>${S.scr1?S.scr1.fields.length+' parsed fields — reference only; the audit re-reads the PO':(S.caughtUp?'not available — SCR1 was done outside FSCR (caught up)':'not available')}</summary>
     ${S.scr1?`<div class="twrap" style="margin-top:8px"><table><tr><th>Field</th><th>Status</th><th>Parsed value</th><th>Parser check</th></tr>
-    ${S.scr1.fields.map(f=>`<tr><td>${esc(f.l)}</td><td><span class="st st-${f.s==='EXTRACTED'||f.s==='NOT_APPLICABLE'||f.s==='ENTRY'?'M':'W'}">${f.s}</span></td>
+    ${S.scr1.fields.map(f=>`<tr><td>${esc(f.l)}</td><td><span class="st st-${f.s==='EXTRACTED'||f.s==='NOT_APPLICABLE'||f.s==='ENTRY'?'M':'W'}">${esc(f.s)}</span></td>
       <td class="mono">${esc(f.v)||'—'}${f.src!==undefined&&f.src!==f.v?`<div class="hint">PO states: ${esc(f.src)}</div>`:''}${f.orig!==undefined&&f.orig!==f.v?`<div class="hint">parser said: ${esc(f.orig)}</div>`:''}${f.why?`<div class="hint">${esc(f.why)}</div>`:''}</td>
       <td>${f.entry?'<span class="hint">Internal Access entry — no parser feedback</span>':accChip('scr2::scr1parse::'+f.k,'','ext')}</td></tr>`).join('')}</table></div>`:''}</details>
   ${billingCard('Pricing &amp; billing — carried from SCR1 (price verification closes at Final Inspection)')}
@@ -2900,7 +3175,7 @@ function viewSCR2(){
    <div class="twrap"><table><tr><th>Field</th><th>PO (yardstick)</th><th>Traveler</th><th>Status + your rating</th></tr>
    ${r.travelerComparison.map(x=>`<tr><td>${esc(x.field)}</td><td class="mono">${esc(x.poValue)||'—'}</td>
      <td class="mono">${esc(x.travelerValue)||'—'}${x.correctionText?`<div class="hint">correction on traveler: “${esc(x.correctionText)}” · initials ${x.correctionInitials==='YES'?'✓':'✗'} · date ${x.correctionDate==='YES'?'✓':'✗'}</div>`:''}</td>
-     <td><span class="st st-${x.status==='MATCH'?'M':x.status==='MISMATCH'?'X':'W'}">${x.status}</span>
+     <td><span class="st st-${x.status==='MATCH'?'M':x.status==='MISMATCH'?'X':'W'}">${esc(x.status)}</span>
       ${x.note?`<div class="hint">${esc(x.note)}</div>`:''}${rowCovered(x.field,x.field+' '+x.poValue+' '+x.travelerValue)?COVERED_HINT:''}</td></tr>`).join('')}</table></div>`:''}
   ${cnCard()}
   ${saveRow()}
@@ -2925,7 +3200,8 @@ function viewSCR2(){
 }
 
 function viewFI(){
-  const r=S.fiReport;const done=S.stage==='CLOSED';
+  const r=S.fiReport&&!reportStale('FI')?S.fiReport:null; // r29j F03: a stale report is not a report
+  const done=S.stage==='CLOSED';
   // r27b (audit finding 2): the closure checklist uses THE obligation
   // function — a passive comparison item can never secretly block closing.
   const open=openBlocking('FI');
@@ -2978,18 +3254,18 @@ function viewFI(){
    <h2 style="font-size:13px">${t}</h2>
    <div class="twrap"><table><tr><th>Check</th><th>Expected (PO governs)</th><th>Found</th><th>Status + your rating</th></tr>
    ${r[k].map(x=>`<tr><td>${esc(x.item)}</td><td class="mono">${esc(x.expected)||'—'}</td><td class="mono">${esc(x.found)||'—'}</td>
-     <td><span class="st st-${x.status==='PASS'?'M':x.status==='DISCREPANCY'?'X':'W'}">${x.status}</span>
+     <td><span class="st st-${x.status==='PASS'?'M':x.status==='DISCREPANCY'?'X':'W'}">${esc(x.status)}</span>
      ${x.note?`<div class="hint">${esc(x.note)}</div>`:''}${rowCovered(x.item,x.item+' '+x.expected+' '+x.found)?COVERED_HINT:''}</td></tr>`).join('')}</table></div>`).join('')}
    ${(!r.labels||!r.labels.length)&&labelsNotRequired()?`<p class="note">Labels — declared NOT REQUIRED for this WO (${esc(S.labelAttest.reason)}); none verified.</p>`:''}
    ${r.labels&&r.labels.length?`<h2 style="font-size:13px">Labels — coverage ${(r.labelCoverage||{labeledUnits:[]}).labeledUnits.length}/${(r.labelCoverage||{expectedUnits:[]}).expectedUnits.length}
     ${(r.labelCoverage&&r.labelCoverage.missing.length)?' · MISSING: '+esc(r.labelCoverage.missing.join(', ')):''}
     ${(r.labelCoverage&&r.labelCoverage.extra.length)?' · EXTRA: '+esc(r.labelCoverage.extra.join(', ')):''}</h2>
-   ${r.labels.map(L=>`<details><summary>${esc(L.labelRef)} · unit ${esc(L.traceabilityUnit)} · <b>${L.status}</b> —
+   ${r.labels.map(L=>`<details><summary>${esc(L.labelRef)} · unit ${esc(L.traceabilityUnit)} · <b>${esc(L.status)}</b> —
       ${L.checks.filter(c=>c.status!=='PASS').map(c=>c.check+': '+c.status).join(', ')||'all checks pass'}</summary>
      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0">
       <div><span class="acc-l">Should read</span><pre class="mono" style="font-size:10px;background:var(--surface2);padding:6px 8px;border-radius:6px;white-space:pre-wrap">${esc(L.shouldRead)}</pre></div>
       <div><span class="acc-l">Actual</span><pre class="mono" style="font-size:10px;background:var(--surface2);padding:6px 8px;border-radius:6px;white-space:pre-wrap">${esc(L.actual)}</pre></div></div>
-     <ul style="margin:4px 0 4px 16px;font-size:11px">${L.checks.map(c=>`<li><b>${c.check}</b>: ${c.status}${c.note?' — '+esc(c.note):''}</li>`).join('')}</ul>
+     <ul style="margin:4px 0 4px 16px;font-size:11px">${L.checks.map(c=>`<li><b>${esc(c.check)}</b>: ${esc(c.status)}${c.note?' — '+esc(c.note):''}</li>`).join('')}</ul>
      ${rowCovered('LABEL',L.shouldRead+' '+L.actual)?COVERED_HINT:''}</details>`).join('')}`:''}
    <h2 style="font-size:13px">Traceability across documents</h2>
    <div class="twrap"><table><tr><th>Field</th><th>PO</th><th>Traveler</th><th>Labels</th><th>COC</th><th>Pack slip</th><th>Consistent + rating</th></tr>
@@ -3010,7 +3286,7 @@ function viewFI(){
   :`${qtyCard}<div class="checklist">
      <label class="${open.length?'auto-no':'auto-ok'}"><input type="checkbox" disabled ${open.length?'':'checked'}>
        Nothing left to finish (${open.length} blocking${overridden.length?'; '+overridden.length+' shipment exception(s) — open, permitted by documented Access approval':''})</label>
-     ${HUMAN.map(h=>`<label><input type="checkbox" ${S.checklist[h[0]]?'checked':''} onchange="setCheck('${h[0]}',this.checked)"> ${h[1]}</label>`).join('')}
+     ${HUMAN.map(h=>`<label><input type="checkbox" ${S.checklist[h[0]]?'checked':''} onchange="setCheck(${escJS(h[0])},this.checked)"> ${h[1]}</label>`).join('')}
     </div>
     <div class="gatebox">
      <button class="primary" ${r&&!open.length&&allChecked&&RV.ini&&S.qtyCheck?'':'disabled'}
