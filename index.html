@@ -409,7 +409,7 @@ function freshInstance(){return {schema:'qpc.fscr.beta/v2',createdAt:new Date().
 // asserts the zip name matches BUILD.id). Rendered in the footer so the floor
 // can see which build a tab is running; stamped into every saved instance so
 // harvests carry build attribution.
-const BUILD={id:'r29k',updated:'2026-09-06'};
+const BUILD={id:'r29l',updated:'2026-09-23'};
 addEventListener('DOMContentLoaded',()=>{const el=document.getElementById('build-stamp');
   if(el)el.textContent='FSCR Beta — build '+BUILD.id+' · updated '+BUILD.updated+' · if the floor announcement names a newer build, refresh this tab.'});
 const CHG={seq:0,saved:0,baseline:false};
@@ -582,7 +582,12 @@ const KNOWN_SLOTS=['po','traveler','labels','print','coc','packSlip'];
 // elsewhere. Escaping at render is the second line; this is the first.
 const FIELD_STATUS=['EXTRACTED','MISSING','UNCLEAR','CONFLICT','NOT_APPLICABLE','ENTRY'];
 const LEDGER_STATES=['OPEN','DEFERRED','OVERRIDDEN','RESOLVED'];
-const PARK_KINDS=['MANAGER CHECK'];
+// r29l (live verification 2026-09-23): the park vocabulary is ONE constant that
+// the park buttons render FROM — r29k derived it by scanning the source and
+// missed 'REVISED PO', so a job parked with "Revised PO requested" could not
+// be reloaded. The import validator and the UI can no longer disagree.
+const PARK_KINDS=['MANAGER CHECK','REVISED PO'];
+const PARK_LABEL={'MANAGER CHECK':'Manager check requested','REVISED PO':'Revised PO requested'};
 const STAGES=['SCR1','SCR2','FI','CLOSED'];
 const TOKEN_RE=/^[A-Z0-9][A-Z0-9 \-_\/.:(),'&—–+]{0,80}$/; // recorded vocabulary tokens (feedback answers, outcomes) — the app's own outcomes carry em dashes ("VERIFIED — COMPLIES"); real-file round trip 2026-09-06
 function validateImported(o){
@@ -2469,7 +2474,7 @@ window.deferPriceToShip=id=>{if(needRv())return;const it=lit(id);if(!it)return;
 // change state, never move the gate, never permit FI close. Typed-evidence
 // closure and the SP0120/G1 override are untouched; resolution clears active
 // parks (audited).
-window.addPark=(id,kind,btn)=>{if(needRv())return;const it=lit(id);if(!it||it.kind!=='price')return;
+window.addPark=(id,kind,btn)=>{if(needRv())return;if(!PARK_KINDS.includes(kind))return;const it=lit(id);if(!it||it.kind!=='price')return;
   const f=btn.closest('.parkform');
   const name=kind==='MANAGER CHECK'?String((f.querySelector('input.mgr')||{}).value||'').trim():'';
   const by=String((f.querySelector('input.ini')||{}).value||'').trim();
@@ -2751,8 +2756,7 @@ function ledgerCard(i,showResolve){
       <span class="hint" style="flex-basis:100%">Park (audited flags — record who owns the next move; NEVER closes the item or changes when it is due; verification still required to resolve):</span>
       <input class="mgr" placeholder="Manager name (for manager check)">
       <input class="ini" placeholder="Initials" value="${escA(RV.ini)}">
-      <button onclick="addPark(${escJS(i.id)},'MANAGER CHECK',this)">\u23f8 Manager check requested</button>
-      <button onclick="addPark(${escJS(i.id)},'REVISED PO',this)">\u23f8 Revised PO requested</button></div>`:''}
+      ${PARK_KINDS.map(k=>`<button onclick="addPark(${escJS(i.id)},${escJS(k)},this)">\u23f8 ${esc(PARK_LABEL[k])}</button>`).join('\n      ')}</div>`:''}
     ${actionable&&showResolve&&i.kind!=='material-id'?`<details style="font-size:11px;margin-top:2px"><summary class="hint">Move this task (audited)</summary>
       <div class="rform">${gateSelect(i.deferredTo||i.gate)}
         <input class="ev" placeholder="Reason (required)"><input class="ini" placeholder="Initials" value="${escA(RV.ini)}">
