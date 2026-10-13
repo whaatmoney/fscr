@@ -409,7 +409,7 @@ function freshInstance(){return {schema:'qpc.fscr.beta/v2',createdAt:new Date().
 // asserts the zip name matches BUILD.id). Rendered in the footer so the floor
 // can see which build a tab is running; stamped into every saved instance so
 // harvests carry build attribution.
-const BUILD={id:'r29l',updated:'2026-09-23'};
+const BUILD={id:'r30m',updated:'2026-10-12'};
 addEventListener('DOMContentLoaded',()=>{const el=document.getElementById('build-stamp');
   if(el)el.textContent='FSCR Beta — build '+BUILD.id+' · updated '+BUILD.updated+' · if the floor announcement names a newer build, refresh this tab.'});
 const CHG={seq:0,saved:0,baseline:false};
@@ -590,6 +590,8 @@ const PARK_KINDS=['MANAGER CHECK','REVISED PO'];
 const PARK_LABEL={'MANAGER CHECK':'Manager check requested','REVISED PO':'Revised PO requested'};
 const STAGES=['SCR1','SCR2','FI','CLOSED'];
 const TOKEN_RE=/^[A-Z0-9][A-Z0-9 \-_\/.:(),'&—–+]{0,80}$/; // recorded vocabulary tokens (feedback answers, outcomes) — the app's own outcomes carry em dashes ("VERIFIED — COMPLIES"); real-file round trip 2026-09-06
+// r30k (R30J-REV-01): saved cost records — the stages the app writes, whole-number counts, money as numbers
+const METRIC_STAGES=['SCR1','VERIFY','SCR2','FI'],METRIC_COUNTS=['runs','failedRuns','costIncompleteRuns','ms','inTok','outTok','cacheRead','cacheWrite'],METRIC_COSTS=['cost','costUnknown'];
 function validateImported(o){
   const bad=[];const B=(w)=>{if(bad.length<12)bad.push(w)};
   const q=v=>JSON.stringify(String(v)).slice(0,60);
@@ -608,7 +610,9 @@ function validateImported(o){
         str(f.editedBy,'field editedBy',40);str(f.enteredBy,'field enteredBy',40);tok(f.entrySrc,'field entrySrc');}
       if(o.scr1.excluded!==undefined&&!Array.isArray(o.scr1.excluded))B('scr1.excluded not an array');}}
   if(o.verified!==undefined){if(!isObj(o.verified))B('verified not an object');else for(const k of Object.keys(o.verified))id(k,'verified key')}
-  if(o.fb!==undefined){if(!isObj(o.fb))B('fb not an object');else for(const k of Object.keys(o.fb)){id(k,'feedback key');const e=o.fb[k];if(!isObj(e)){B('feedback entry not an object');continue}tok(e.ext,'feedback ext');tok(e.xf,'feedback xf')}}
+  if(o.fb!==undefined){if(!isObj(o.fb))B('fb not an object');else for(const k of Object.keys(o.fb)){id(k,'feedback key');const e=o.fb[k];if(!isObj(e)){B('feedback entry not an object');continue}tok(e.ext,'feedback ext');tok(e.xf,'feedback xf');str(e.v,'feedback value')}}
+  // r30g (R30F-REV-03): answers retired by a later edit, each with the value it was given on
+  if(o.fbRetired!==undefined){if(!Array.isArray(o.fbRetired))B('fbRetired not a list');else for(const e of o.fbRetired){if(!isObj(e)){B('retired feedback not an object');continue}id(e.k,'retired feedback key');tok(e.ext,'retired feedback ext');tok(e.xf,'retired feedback xf');str(e.v,'retired feedback value');str(e.seenAtRetirement,'retired feedback seen value');str(e.note,'retired feedback note')}}
   if(o.ledger!==undefined){if(!Array.isArray(o.ledger))B('ledger not an array');
     else for(const i of o.ledger){if(!isObj(i)){B('ledger entry not an object');continue}
       id(i.id,'ledger id');en(i.state,LEDGER_STATES,'ledger state');en(i.cls,['HOLD','ALERT'],'ledger class');
@@ -628,6 +632,38 @@ function validateImported(o){
   if(o.signoffs!==undefined){if(!Array.isArray(o.signoffs))B('signoffs not an array');else for(const s of o.signoffs){if(!isObj(s)){B('sign-off not an object');continue}en(s.stage,['SCR1','SCR2','FI'],'sign-off stage');str(s.name,'sign-off name',120);str(s.ini,'sign-off initials',20)}}
   if(o.history!==undefined&&!Array.isArray(o.history))B('history not an array');
   for(const st of ['scr2Report','fiReport']){const r=o[st];if(r!==undefined&&r!==null&&!isObj(r))B(st+' not an object')}
+  // r30m (R30L-REV-02): job records the screens print are objects of text fields (survey 2026-10-12, 1,825 files: zero violations)
+  const rec=(v,what,fields,extra)=>{if(v===undefined||v===null)return;if(!isObj(v)){B(what+' not an object');return}
+    for(const k of Object.keys(v)){if(!fields.includes(k)){B(what+' field '+q(k));continue}if(v[k]!==undefined&&v[k]!==null&&typeof v[k]!=='string')B(what+'.'+k+' not text')}if(extra)extra(v)};
+  rec(o.qtyCheck,'qtyCheck',['expected','actual','reason','by','at']);
+  rec(o.labelAttest,'labelAttest',['type','by','name','at','declaredAt','reason'],v=>en(v.type,['GENERATED','NOT_REQUIRED'],'labelAttest type'));
+  rec(o.advancePo,'advancePo',['by','at']);rec(o.caughtUp,'caughtUp',['at','by','enteredAt']);rec(o.woFileMismatch,'woFileMismatch',['file','instance','at']);
+  if(o.checklist!==undefined&&o.checklist!==null){if(!isObj(o.checklist))B('checklist not an object');else for(const [k,v] of Object.entries(o.checklist))if(!['coc','pack','trace','phys'].includes(k)||typeof v!=='boolean')B('checklist '+q(k))}
+  // r30l (R30K-REV-01): a saved report's lists are lists of objects (survey 2026-10-12: 900 SCR2 + 28 FI reports, zero violations); text inside is escaped at render
+  const objList=(v,what)=>{if(v===undefined||v===null)return;if(!Array.isArray(v)){B(what+' not a list');return}for(const x of v)if(!isObj(x)){B(what+' entry not an object');return}};
+  const R2=o.scr2Report,RF=o.fiReport;
+  if(isObj(R2)){objList(R2.travelerComparison,'scr2Report.travelerComparison');if(R2.inputs!==undefined&&R2.inputs!==null&&!isObj(R2.inputs))B('scr2Report.inputs not an object')}
+  if(isObj(RF)){for(const k of ['cocChecks','packSlipChecks','labels','traceability'])objList(RF[k],'fiReport.'+k);
+    if(Array.isArray(RF.labels))for(const L of RF.labels)if(isObj(L))objList(L.checks,'fiReport.labels.checks');
+    const lc=RF.labelCoverage;if(lc!==undefined&&lc!==null){if(!isObj(lc))B('fiReport.labelCoverage not an object');else for(const k of ['expectedUnits','labeledUnits','missing','extra'])if(lc[k]!==undefined&&!Array.isArray(lc[k]))B('fiReport.labelCoverage.'+k+' not a list')}
+    if(RF.inputs!==undefined&&RF.inputs!==null&&!isObj(RF.inputs))B('fiReport.inputs not an object')}
+  // r30k (R30J-REV-01): cost records and comparison counts are numbers on known names — a saved file cannot put markup on the page
+  const cnt=v=>Number.isInteger(v)&&v>=0,usd=v=>typeof v==='number'&&Number.isFinite(v)&&v>=0;
+  if(o.metrics!==undefined&&o.metrics!==null){const M=o.metrics;
+    if(!isObj(M))B('metrics not an object');
+    else{for(const k of Object.keys(M))if(!['stages','totalCost','totalCostUnknown'].includes(k))B('metrics field '+q(k));
+      for(const k of ['totalCost','totalCostUnknown'])if(M[k]!==undefined&&!usd(M[k]))B('metrics '+k+' not an amount');
+      if(M.stages!==undefined){if(!isObj(M.stages))B('metrics.stages not an object');
+        else for(const sk of Object.keys(M.stages)){if(!METRIC_STAGES.includes(sk)){B('metrics stage '+q(sk));continue}
+          const x=M.stages[sk];if(!isObj(x)){B('metrics stage '+sk+' not an object');continue}
+          for(const f of Object.keys(x)){
+            if(METRIC_COUNTS.includes(f)){if(!cnt(x[f]))B('metrics '+sk+'.'+f+' not a count')}
+            else if(METRIC_COSTS.includes(f)){if(!usd(x[f]))B('metrics '+sk+'.'+f+' not an amount')}
+            else if(f==='model'){if(typeof x[f]!=='string'||!/^[a-z0-9.\-]{1,80}$/.test(x[f]))B('metrics '+sk+'.model '+q(x[f]))}
+            else B('metrics field '+q(sk+'.'+f))}}}}}
+  if(o.shadow!==undefined&&o.shadow!==null){if(!isObj(o.shadow))B('shadow not an object');
+    else if(o.shadow.counts!==undefined&&o.shadow.counts!==null){const c=o.shadow.counts;
+      if(!isObj(c))B('shadow counts not an object');else for(const k of Object.keys(c))if(!['agree','disagree','unresolved'].includes(k)||!cnt(c[k]))B('shadow count '+q(k))}}
   return bad}
 // r29k (review finding 5): derived data in an imported file is NOT evidence.
 // Every document fingerprint is DROPPED and recomputed from the imported
@@ -636,7 +672,7 @@ function validateImported(o){
 function refingerprint(o){if(!o||!o.docs||typeof o.docs!=='object')return o;
   for(const k of Object.keys(o.docs)){const v=o.docs[k];for(const d of (Array.isArray(v)?v:(v?[v]:[]))){if(d&&typeof d==='object')delete d.fp}}
   docSnapshot(o.docs);return o}
-window.loadFile=inp=>{const f=inp.files[0];if(!f)return;const r=new FileReader();
+window.loadFile=inp=>{if(navBusy())return;const f=inp.files[0];if(!f)return;const r=new FileReader();
   r.onload=()=>{try{const o=JSON.parse(r.result);
     if(o.schema!=='qpc.fscr.beta/v1'&&o.schema!=='qpc.fscr.beta/v2')throw new Error('Not an FSCR beta instance file.');
     // WO-identity guard (43756 fixture): the file name and the instance disagree on the job
@@ -702,7 +738,10 @@ function idbar(){
 window.setAcc=(k,f)=>{if(!RV.ini){alert('Set your name/initials at the top first — feedback must be attributable.');return}
   const pm=k.match(/^scr2::scr1parse::(.+)$/); // entry fields take NO parser feedback (r7 correction 2)
   if(pm&&S.scr1&&(S.scr1.fields||[]).some(x=>x.k===pm[1]&&x.entry))return;
-  const a=S.accuracy[k]||(S.accuracy[k]={});a.f=(a.f===f?null:f);a.by=RV.ini;a.at=today();persistDraft();render();toast(a.f?'\u2713 Feedback saved \u2014 '+a.f.toLowerCase()+' ('+RV.ini+')':'Feedback cleared')}
+  const a=S.accuracy[k]||(S.accuracy[k]={});a.f=(a.f===f?null:f);a.by=RV.ini;a.at=today();
+  if(/^scr2::row::/.test(k)&&S.scr2Report){const rows=S.scr2Report.travelerComparison||[];const i=rows.findIndex((x,ri)=>scr2RowKey(x,ri,S.scr2Report)===k);
+    if(i>=0){const x=rows[i];a.row={report:S.scr2Report.analyzedAt||null,index:i,field:x.field,poValue:x.poValue,travelerValue:x.travelerValue,status:x.status}}} // r30e: the verdict carries the facts it judged
+  persistDraft();render();toast(a.f?'\u2713 Feedback saved \u2014 '+a.f.toLowerCase()+' ('+RV.ini+')':'Feedback cleared')}
 window.setAccNote=(k,v)=>{const a=S.accuracy[k]||(S.accuracy[k]={});a.note=v;a.by=a.by||RV.ini;a.at=today();persistDraft();if(v.trim())toast('\u2713 Note saved \u2014 tribal knowledge captured');updateTopbar()}
 // Three-axis feedback taxonomy (ruling 07-14 item 4), inference-first:
 //  1. source extraction (correct/wrong/unclear) — judged against WHAT THE PO SAYS
@@ -713,6 +752,7 @@ const ACC_DEF={USEFUL:'Real signal — this finding/row helped',NOISE:'Wasted at
   WRONG:'The parser misread the source document',UNCLEAR:'Cannot tell from the documents'};
 const ACC_CLS={USEFUL:'on-ACCURATE',NOISE:'on-WRONG',WRONG:'on-WRONG',UNCLEAR:'on-MINOR'};
 function accChip(key,label,mode){const a=S.accuracy[key]||{};const opts=mode==='ext'?['WRONG','UNCLEAR']:['USEFUL','NOISE'];
+  if(mode==='row')return `<div class="acc">${opts.map(f=>`<button class="acc-b ${a.f===f?ACC_CLS[f]:''}" title="${ACC_DEF[f]}" onclick="setAcc(${escJS(key)},${escJS(f)})">${f.charAt(0)+f.slice(1).toLowerCase()}</button>`).join('')}${a.by?`<span class="hint">${esc(a.by)}</span>`:''}</div>`;
   return `<div class="acc"><span class="acc-l">${label||(mode==='ext'?'extraction':'useful?')}</span>
     ${opts.map(f=>`<button class="acc-b ${a.f===f?ACC_CLS[f]:''}" title="${ACC_DEF[f]}" onclick="setAcc(${escJS(key)},${escJS(f)})">${f.charAt(0)+f.slice(1).toLowerCase()}</button>`).join('')}
     <input class="acc-n" placeholder="note — what you checked / why…" value="${escA(a.note||'')}" onchange="setAccNote(${escJS(key)},this.value)">
@@ -722,8 +762,11 @@ window.flagFb=k=>{if(needRv())return;FLAGGING[k]=true;render()};
 window.cancelFb=k=>{delete FLAGGING[k];render()};
 window.setFb=(k,ext)=>{if(needRv())return;const f=S.scr1.fields.find(x=>x.k===k);if(!f)return;
   const nid='fbn-'+k.replace(/[^A-Za-z0-9]/g,'_');const noteEl=document.getElementById(nid);
-  S.fb=S.fb||{};S.fb[k]={ext,xf:f.editedBy?'EDITED':'ACCEPTED',note:noteEl?noteEl.value.trim():'',by:RV.ini,at:today()};
-  delete FLAGGING[k];persistDraft();render();toast('\u2713 Recorded — extraction '+ext.toLowerCase()+(f.editedBy?' · entry edited':''))};
+  // r30g (R30F-REV-03, Tyler 2026-10-10): an answer is bound to the value it was given on (v)
+  S.fb=S.fb||{};S.fb[k]={ext,xf:f.editedBy?'EDITED':'ACCEPTED',note:noteEl?noteEl.value.trim():'',by:RV.ini,at:today(),v:String(f.v??'')};
+  // "wrong vs the PO" on a value nobody corrected contradicts its "verified" tick: the tick clears until the value is fixed and re-verified
+  const untick=ext==='WRONG'&&!f.editedBy&&!!(S.verified&&S.verified[k]);if(untick)S.verified[k]=false;
+  delete FLAGGING[k];persistDraft();render();toast('\u2713 Recorded — extraction '+ext.toLowerCase()+(f.editedBy?' · entry edited':'')+(untick?' · now edit it to what the PO says and re-verify':''))};
 function fbRow(f){const fb=S.fb&&S.fb[f.k];const nid='fbn-'+f.k.replace(/[^A-Za-z0-9]/g,'_');
   if(f.entry){return f.enteredBy?`<span class="f-acc hint">entered from ${esc(f.entrySrc||'ACCESS')} by ${esc(f.enteredBy)} ${esc(f.enteredAt||'')}</span>`:''}
   if(fb&&!fb.auto){return `<span class="f-acc hint">feedback: extraction ${fb.ext.toLowerCase()}${fb.note?' — '+esc(fb.note):''} · entry ${fb.xf==='EDITED'?'edited':'accepted'} (${esc(fb.by||'')}) <button onclick="delete S.fb[${escJS(f.k)}];persistDraft();render()">×</button></span>`}
@@ -746,15 +789,30 @@ function fbRow(f){const fb=S.fb&&S.fb[f.k];const nid='fbn-'+f.k.replace(/[^A-Za-
 // Cost math only; NO keys or secrets are ever stored.
 // r25: $/MTok per model. Client-side cost figures are ESTIMATES AND WARNINGS
 // ONLY (Tyler 07-24) — enforceable spending limits live in the vendor console.
-const PRIMARY_MODEL='claude-opus-4-8'; // r29j: floor-repair round stays on the r29i model line; the Opus 5 upgrade (validated r30c) ships as r30d
+const PRIMARY_MODEL='claude-opus-4-8'; // r30i: Opus 4.8 stays the floor model (Tyler 2026-10-10 "Sure if it is scoring better than that is fine for now" — docs/model-comparison-2026-10-10.md); the Opus 5.5 path stays in the code, dormant
 const MODEL_MTOK={
+  'claude-opus-5-5':{inTok:4.00,outTok:20.00,cacheRead:0.20,cacheWrite:5.00}, // r30f
+  'claude-sonnet-5-5':{inTok:2.00,outTok:10.00,cacheRead:0.20,cacheWrite:2.50}, // r30f
   'claude-opus-5':{inTok:5.00,outTok:25.00,cacheRead:0.50,cacheWrite:6.25},
   'claude-opus-4-8':{inTok:5.00,outTok:25.00,cacheRead:0.50,cacheWrite:6.25},
   'claude-sonnet-5':{inTok:2.00,outTok:10.00,cacheRead:0.20,cacheWrite:2.50}};
 const MTOK_COST=MODEL_MTOK[PRIMARY_MODEL];
-function calcCostFor(u,model){const R=MODEL_MTOK[model]||MTOK_COST;
-  return Math.round(((u.inTok||0)*R.inTok+(u.outTok||0)*R.outTok
-  +(u.cacheRead||0)*R.cacheRead+(u.cacheWrite||0)*R.cacheWrite)/1e6*10000)/10000}
+// r30e: costs keep full precision per attempt and round once, to $0.000001 —
+// rounding each attempt to $0.0001 lost fallback money (r30d audit R30D-04).
+function costRaw(u,model){const R=MODEL_MTOK[model]||MTOK_COST;
+  return ((u.inTok||0)*R.inTok+(u.outTok||0)*R.outTok+(u.cacheRead||0)*R.cacheRead+(u.cacheWrite||0)*R.cacheWrite)/1e6}
+const roundUsd=x=>Math.round(x*1e6)/1e6;
+// r30k (R30J-REV-01): a number that reaches the page from saved data is rendered ONLY as a number
+const num=v=>typeof v==='number'&&Number.isFinite(v)?v:0;
+// r30l (R30K-REV-01): a list that reaches the page from a saved report is rendered ONLY as a list
+const arr=v=>Array.isArray(v)?v:[];
+// r30f (r30e inspection R30E-06): a refusal before any output is BILLED when its
+// category is bio, frontier_llm or reasoning_extraction; any other category or
+// null is not. A declined hop that a fallback then served carries NO category
+// in usage.iterations, so its billing is UNKNOWN — recorded with its possible
+// cost, never asserted free.
+const BILLED_REFUSALS=new Set(['bio','frontier_llm','reasoning_extraction']);
+function calcCostFor(u,model){return roundUsd(costRaw(u,model))}
 function calcCost(u){return calcCostFor(u,PRIMARY_MODEL)}
 // r30c (model validation finding): claude-opus-5 sometimes wraps a forced
 // tool call's arguments in ONE envelope key ({"input":{…}}, {"body":{…}},
@@ -782,7 +840,45 @@ async function callClaude(system,tool,content,label,opts){
   // (array form: header server-side-fallback-2026-06-01). The verifier gets no
   // fallback: a refused shadow run degrades to AUDIT NOT PERFORMED honestly.
   // The SERVED model is captured from message_start and recorded per call.
-  const _fb=_model===PRIMARY_MODEL&&/opus-5/.test(PRIMARY_MODEL); // r29j: the fallback param 400s on opus-4-8 — only armed when the primary is Opus 5 (r30d)
+  const _fb=_model==='claude-opus-5-5'; // r30i: refusal fallback (array form → opus-4-8) is armed ONLY on an Opus 5.5 call — dormant while Opus 4.8 is primary (the param 400s on opus-4-8; the verifier never falls back)
+  // r30f: Opus 5.5 / Sonnet 5.5 REJECT forced tool_choice (400). The tool is
+  // REQUESTED, not forced: tool_choice auto with at most one call, an explicit
+  // instruction, effort set explicitly (Opus 5.5 would default to medium). A
+  // reply without the call is retried ONCE; a second miss fails closed.
+  const _sys=system+'\n\nRESPONSE FORMAT (mandatory): respond ONLY by calling the '+tool.name+' tool exactly once with the complete result. Do not answer in text.';
+  const prior=[]; // attempts that returned no tool call — kept on the record
+  // r30g (R30F-REV-05): stream state lives OUTSIDE the round loop and cost is
+  // settled by ONE function on every exit — success, failure, a stream that
+  // breaks mid-read, an abort — so observed usage is never saved as $0.
+  let toolIx=-1,toolStopped=false,stopReason='',msgStopped=false,iters=null,refusalCat,settled=false,toolCalls=0,otherTool=''; // r30g/r30h
+  const settle=()=>{settled=true;
+    // r30e (R30D-04): with usage.iterations, EVERY attempt is recorded with its
+    // own model and tokens and billed at that model's rates; the top-level
+    // counts describe the serving attempt only.
+    if(iters&&iters.length){
+      _m.attempts=iters.map((e,i)=>{const a={type:e.type,model:e.model||(e.type==='fallback_message'?_m.model:(i===0?_model:_m.model))||_model,inTok:e.input_tokens||0,outTok:e.output_tokens||0, // r30i: an iteration without a model name takes the model that ran it (paid check 1)
+        cacheRead:e.cache_read_input_tokens||0,cacheWrite:e.cache_creation_input_tokens||0};
+        const last=i===iters.length-1,preOutput=a.outTok===0&&(a.type==='message'||(last&&stopReason==='refusal'));
+        // r30f/r30g (R30E-06, R30F-REV-08): a pre-output decline bills by its STATED category;
+        // a declined hop before a fallback, or a refusal whose category was not sent, is UNKNOWN
+        if(!preOutput)a.billed=true;
+        else if(last&&stopReason==='refusal'&&refusalCat!==undefined){a.billed=BILLED_REFUSALS.has(refusalCat);a.refusalCategory=refusalCat}
+        else{a.billed='unknown';a.possibleCost=roundUsd(costRaw(a,a.model))}
+        a.cost=a.billed===true?roundUsd(costRaw(a,a.model)):0;return a});
+      const served=[..._m.attempts].reverse().find(a=>a.type==='fallback_message')||_m.attempts[_m.attempts.length-1];
+      if(served){_m.model=served.model||_m.model;_m.inTok=served.inTok;_m.outTok=served.outTok;_m.cacheRead=served.cacheRead;_m.cacheWrite=served.cacheWrite;}
+      if(_m.attempts.some(a=>a.type==='fallback_message')&&!_m.fallbackFrom){const first=_m.attempts.find(a=>a.type==='message');if(first)_m.fallbackFrom=first.model}
+      _m.cost=roundUsd(_m.attempts.reduce((t,a)=>t+(a.billed===true?costRaw(a,a.model):0),0));
+      const unk=_m.attempts.reduce((t,a)=>t+(a.billed==='unknown'?costRaw(a,a.model):0),0);if(unk>0)_m.costUnknown=roundUsd(unk);
+    }else if(stopReason==='refusal'&&_m.outTok===0){ // a pre-output refusal with no fallback attempt
+      if(refusalCat===undefined){_m.refusalCategory='not stated';_m.cost=0;_m.costUnknown=calcCostFor(_m,_m.model||_model)} // R30F-REV-08: unknown, never free
+      else{_m.refusalCategory=refusalCat;_m.cost=BILLED_REFUSALS.has(refusalCat)?calcCostFor(_m,_m.model||_model):0}
+    }else{_m.cost=calcCostFor(_m,_m.model||_model);
+      if(!msgStopped)_m.costIncomplete=true;} // a stream that ended early: the observed usage is a lower bound
+  };
+  const addPrior=()=>{if(!prior.length||_m.retried)return;_m.retried=prior;
+    _m.cost=roundUsd((_m.cost||0)+prior.reduce((t,a)=>t+a.cost,0));
+    const pu=prior.reduce((t,a)=>t+(a.costUnknown||0),0);if(pu)_m.costUnknown=roundUsd((_m.costUnknown||0)+pu);};
   // r25b (audit finding 5): a REAL deadline. opts.timeoutMs arms an
   // AbortController covering the entire call \u2014 connect, retries, and the
   // stream read \u2014 so a hung verifier can never wedge the dual run. The
@@ -793,14 +889,15 @@ async function callClaude(system,tool,content,label,opts){
   const _m={ms:0,inTok:0,outTok:0,cacheRead:0,cacheWrite:0,cost:0,model:_model};const _t0=Date.now();
   callClaude.last=null;
   try{
+    for(let round=0;;round++){
     let resp;
     for(let attempt=0;;attempt++){
       resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:Object.assign({
         'content-type':'application/json','x-api-key':KEY.v,'anthropic-version':'2023-06-01',
         'anthropic-dangerous-direct-browser-access':'true'},_fb?{'anthropic-beta':'server-side-fallback-2026-06-01'}:{}),
         signal:_ctl?_ctl.signal:undefined,
-        body:JSON.stringify(Object.assign({model:_model,max_tokens:32000,stream:true,system,
-          tools:[tool],tool_choice:{type:'tool',name:tool.name},messages:[{role:'user',content}]},
+        body:JSON.stringify(Object.assign({model:_model,max_tokens:32000,stream:true,system:_sys,
+          tools:[tool],tool_choice:{type:'auto',disable_parallel_tool_use:true},output_config:{effort:'high'},messages:[{role:'user',content}]},
           _fb?{fallbacks:[{model:'claude-opus-4-8'}]}:{}))});
       if(resp.ok)break;
       if((resp.status===429||resp.status===529||resp.status===503)&&attempt<3){
@@ -823,7 +920,7 @@ async function callClaude(system,tool,content,label,opts){
     // call (text, refusal text, an empty message) used to parse as {} and
     // become an EMPTY REPORT with sign-off enabled. The tool_use block and
     // the stop reason are tracked; anything but a completed tool call throws.
-    let toolIx=-1,toolStopped=false,stopReason='',msgStopped=false; // r29k: the tool block is tracked BY INDEX and must complete
+    toolIx=-1;toolStopped=false;stopReason='';msgStopped=false;iters=null;refusalCat=undefined;settled=false;toolCalls=0;otherTool=''; // r29k: the tool block is tracked BY INDEX and must complete (r30g: state hoisted for settle())
     while(true){const{done,value}=await reader.read();if(done)break;
       buf+=dec.decode(value,{stream:true});let ix;
       while((ix=buf.indexOf('\n'))>=0){const line=buf.slice(0,ix).trim();buf=buf.slice(ix+1);
@@ -833,27 +930,63 @@ async function callClaude(system,tool,content,label,opts){
           _m.inTok+=u.input_tokens||0;_m.cacheRead+=u.cache_read_input_tokens||0;_m.cacheWrite+=u.cache_creation_input_tokens||0;
           // r30: record the SERVED model (differs from the requested one only when the refusal fallback ran)
           if(ev.message.model){_m.model=ev.message.model;if(ev.message.model!==_model)_m.fallbackFrom=_model;}}
-        if(ev.type==='message_delta'&&ev.usage){_m.outTok=ev.usage.output_tokens||_m.outTok;}
+        if(ev.type==='message_delta'&&ev.usage){_m.outTok=ev.usage.output_tokens||_m.outTok;
+          if(Array.isArray(ev.usage.iterations))iters=ev.usage.iterations;} // r30e: per-attempt billing record (refusal fallback)
         if(ev.type==='message_delta'&&ev.delta&&ev.delta.stop_reason)stopReason=ev.delta.stop_reason;
+        if(ev.type==='message_delta'&&ev.delta&&ev.delta.stop_details&&'category' in ev.delta.stop_details)refusalCat=ev.delta.stop_details.category; // r30f: refusal category (billing)
         if(ev.type==='message_stop')msgStopped=true;
+        // r30d: server-side refusal fallback on a stream — the declined model's partial
+        // output stays in the stream; the switch arrives as a content block of type
+        // 'fallback' and the fallback model's own tool call follows it. Everything
+        // before the switch is discarded: tool tracking restarts, the served model
+        // is re-recorded (cost is priced at the model that produced the result).
+        if(ev.type==='content_block_start'&&ev.content_block&&ev.content_block.type==='fallback'){
+          toolIx=-1;toolStopped=false;json='';toolCalls=0;otherTool=''; // r30h: only the serving attempt's calls count
+          const fb=ev.content_block,to=fb.to&&fb.to.model,from=fb.from&&fb.from.model;
+          if(to){_m.fallbackFrom=_m.fallbackFrom||from||_model;_m.model=to;}}
+        // r30h (r30g inspection R30G-02): EVERY tool call is counted; exactly one, to this tool, is the only usable reply
+        if(ev.type==='content_block_start'&&ev.content_block&&ev.content_block.type==='tool_use'){toolCalls++;if(ev.content_block.name!==tool.name)otherTool=ev.content_block.name||'?'}
         if(ev.type==='content_block_start'&&ev.content_block&&ev.content_block.type==='tool_use'&&ev.content_block.name===tool.name&&toolIx<0)toolIx=ev.index;
         if(ev.type==='content_block_stop'&&ev.index===toolIx&&toolIx>=0)toolStopped=true;
         if(ev.type==='content_block_delta'&&ev.delta&&ev.delta.type==='input_json_delta'&&ev.index===toolIx){
           json+=ev.delta.partial_json;
           const el=$('#busy-msg');if(el)el.textContent=label+' \u2014 reading documents & auditing\u2026 ('+Math.round(json.length/1024)+' KB of findings so far)';}
         if(ev.type==='error')throw new Error((ev.error&&ev.error.message)||'stream error');}}
-    _m.ms=Date.now()-_t0;_m.cost=calcCostFor(_m,_m.model||_model);callClaude.last=_m;
+    _m.ms=Date.now()-_t0;
+    settle();
+    // r30f: a reply that never called the tool is retried ONCE (Opus 5.5 / Sonnet 5.5 cannot be forced); its cost stays on the record.
+    // r30g (R30F-REV-04): ONLY a COMPLETED reply that ended normally (end_turn, message_stop seen) is retried —
+    // never a refusal, an output-limit cut-off, or a stream that ended early.
+    if(toolIx<0&&stopReason==='end_turn'&&msgStopped&&round===0&&!(opts&&opts.noToolRetry)){
+      prior.push({type:'no_tool_call_retried',model:_m.model||_model,inTok:_m.inTok,outTok:_m.outTok,cacheRead:_m.cacheRead,cacheWrite:_m.cacheWrite,billed:true,cost:_m.cost,stopReason,
+        costUnknown:_m.costUnknown||0,attempts:_m.attempts||null});
+      Object.assign(_m,{inTok:0,outTok:0,cacheRead:0,cacheWrite:0,cost:0,model:_model});delete _m.attempts;delete _m.fallbackFrom;delete _m.costUnknown;delete _m.costIncomplete;delete _m.refusalCategory;
+      const el=$('#busy-msg');if(el)el.textContent=label+' \u2014 the reply had no '+tool.name+' result; asking again (once)\u2026';
+      continue;}
+    addPrior();
+    callClaude.last=_m;
     if(opts&&opts.metricsOut)Object.assign(opts.metricsOut,_m);
-    if(toolIx<0)throw new Error(label+': the model returned NO '+tool.name+' result (no tool call in the reply'+(stopReason?'; stop_reason '+stopReason:'')+') — nothing was recorded. Re-run.');
+    if(stopReason==='refusal')throw new Error(label+': the request was DECLINED by the model\'s safety review (stop_reason refusal'+(refusalCat?'; category '+refusalCat:'')+(_fb?'; the fallback model declined too':'')+') — nothing was recorded.');
+    if(toolIx<0)throw new Error(label+': the model returned NO '+tool.name+' result (no tool call in the reply'+(stopReason?'; stop_reason '+stopReason:'')+(prior.length?'; asked twice':'')+') — nothing was recorded. Re-run.');
     if(stopReason==='max_tokens')throw new Error(label+': the reply was cut off at the output limit — the result is incomplete and was NOT recorded. Re-run.');
-    if(!toolStopped||!msgStopped||!stopReason)throw new Error(label+': the reply ended before the '+tool.name+' result completed (stream incomplete'+(stopReason?'; stop_reason '+stopReason:'; no stop reason')+') — nothing was recorded. Re-run.');
+    if(toolCalls>1||otherTool)throw new Error(label+': the reply contained '+(otherTool?'a call to '+otherTool+' besides ':'')+toolCalls+' tool call'+(toolCalls===1?'':'s')+' — exactly one '+tool.name+' result is required; nothing was recorded. Re-run.'); // r30h R30G-02
+    if(!toolStopped||!msgStopped||stopReason!=='tool_use')throw new Error(label+': the reply ended before the '+tool.name+' result completed (stream incomplete'+(stopReason?'; stop_reason '+stopReason:'; no stop reason')+') — nothing was recorded. Re-run.'); // r30h R30G-02: success requires stop_reason tool_use
     let parsed;try{parsed=JSON.parse(json||'{}')}catch(e){throw new Error(label+': the model\'s '+tool.name+' result was not valid JSON — nothing was recorded. Re-run.')}
     const out=unwrapToolInput(parsed,tool);
     const shapeErr=toolResultError(tool,out);
     if(shapeErr)throw new Error(label+': '+shapeErr+' — nothing was recorded. Re-run.');
     return out;
-  }catch(e){
-    if(_ctl&&_ctl.signal.aborted)throw new Error('timeout after '+Math.round(opts.timeoutMs/1000)+'s — the call was aborted');
+    } // round
+  }catch(e0){
+    let e=e0;
+    if(_ctl&&_ctl.signal.aborted)e=new Error('timeout after '+Math.round(opts.timeoutMs/1000)+'s — the call was aborted');
+    // r30f (R30E-04): a call that FAILED after tokens were spent still carries its
+    // metrics (failed:true), so the caller records the spend exactly once. A
+    // failed result is never mapped to a report, gate or ledger.
+    const used=_m.inTok||_m.outTok||_m.cacheRead||_m.cacheWrite||iters;
+    if(used&&!settled){if(!_m.ms)_m.ms=Date.now()-_t0;settle();} // r30g (R30F-REV-05): observed usage is always costed
+    if(used||_m.attempts||prior.length){if(!_m.ms)_m.ms=Date.now()-_t0;addPrior();
+      _m.failed=true;e.metrics=Object.assign({},_m);if(opts&&opts.metricsOut)Object.assign(opts.metricsOut,_m);}
     throw e;
   }finally{if(_kill)clearTimeout(_kill);BUSY.count--;BUSY.on=BUSY.count>0;if(!BUSY.on)BUSY.msg='';}
 }
@@ -887,6 +1020,19 @@ function toolResultError(tool,out){
   if(errs.length)return 'the '+tool.name+' result is malformed — '+errs.slice(0,5).join('; ')+(errs.length>5?'; …':'');
   for(const k of (NONEMPTY_SECTIONS[tool.name]||[]))if(!Array.isArray(out[k])||!out[k].length)return 'the '+tool.name+' result has an EMPTY '+k+' — the audit compared nothing';
   return null}
+// r30d (harvest 2026-09-23 / UX review): the floor sees what happened and what to
+// do in plain words; the exact technical message follows for Tyler.
+function plainFailure(e){const t=String((e&&e.message)||e||'');
+  if(/screen moved to another job before the audit finished/i.test(t))return 'The screen moved to another job before this audit finished, so its result was not applied to any job and nothing was saved. Open that job again and run the audit again.'; // r30j R4-01
+  if(/changed while the .* audit was running/i.test(t))return 'A document on this job changed while the audit was running, so the result was thrown away. Run the audit again.';
+  if(/DECLINED|stop_reason refusal/i.test(t))return 'The AI declined to process these documents. Nothing was saved. Tell Tyler the job number and what you uploaded.';
+  if(/timeout|aborted/i.test(t))return 'The audit took too long and was stopped. Nothing was saved. Run it again.';
+  if(/rate limit|overloaded|HTTP 429|HTTP 529|HTTP 503/i.test(t))return 'The AI service is busy right now. Nothing was saved. Wait a minute and run it again.';
+  if(/api key|x-api-key|authentication|HTTP 401|HTTP 403/i.test(t))return 'The API key was not accepted. Re-enter the key in the bar at the top, then run it again.';
+  if(/failed to fetch|networkerror|network|load failed/i.test(t))return 'Could not reach the AI service. Check the internet connection and run it again.';
+  if(/NO emit_|ended before|cut off at the output limit|not valid JSON|malformed|EMPTY|no field block/i.test(t))return 'The audit came back incomplete. Nothing was saved. Run it again. If it happens twice on the same job, tell Tyler.';
+  return 'The step did not finish. Nothing was saved. Run it again. If it keeps happening, tell Tyler.'}
+function failAlert(what,e){alert(what+' — '+plainFailure(e)+'\n\nDetails for Tyler: '+String((e&&e.message)||e||''))}
 const fileB64=f=>new Promise((res,rej)=>{const r=new FileReader();
   r.onload=()=>res(String(r.result).slice(String(r.result).indexOf(',')+1));r.onerror=()=>rej(r.error);r.readAsDataURL(f)});
 const pdfBlock=b64=>({type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}});
@@ -992,18 +1138,27 @@ const FIELD_NORMALIZERS={shipTo:normalizeShipTo,shipMethod:normalizeShipMethod,
 // ran it, so a saved instance identifies both pilot runs and their costs.
 function addRunMetrics(job,stage,m){if(!m||!job||m.ms==null)return;
   const sbr=(job.stageBuildRuns=job.stageBuildRuns||[]); // r19: one entry per ACTUAL stage run — reruns append, never overwrite
-  sbr.push({stage,buildId:BUILD.id,at:new Date().toISOString(),runNumber:sbr.filter(x=>x.stage===stage).length+1,model:m.model||''});
+  sbr.push(Object.assign({stage,buildId:BUILD.id,at:new Date().toISOString(),runNumber:sbr.filter(x=>x.stage===stage).length+1,model:m.model||''},
+    m.attempts?{attempts:m.attempts,fallbackFrom:m.fallbackFrom||null}:{},
+    m.retried?{retried:m.retried}:{},m.failed?{failed:true}:{},m.costUnknown?{costUnknown:m.costUnknown}:{},m.costIncomplete?{costIncomplete:true}:{},m.refusalCategory!==undefined?{refusalCategory:m.refusalCategory}:{})); // r30e/r30f: every attempt, retry and failed run stays on the record
   job.metrics=job.metrics||{stages:{}};
   const s=job.metrics.stages[stage]=job.metrics.stages[stage]||{runs:0,ms:0,inTok:0,outTok:0,cacheRead:0,cacheWrite:0,cost:0};
-  s.runs++;s.ms+=m.ms;s.inTok+=m.inTok;s.outTok+=m.outTok;s.cacheRead+=m.cacheRead;s.cacheWrite+=m.cacheWrite;
+  if(m.failed)s.failedRuns=(s.failedRuns||0)+1;else s.runs++; // r30f: a failed run is spend, not a completed run
+  if(m.costUnknown)s.costUnknown=roundUsd((s.costUnknown||0)+m.costUnknown);
+  if(m.costIncomplete)s.costIncompleteRuns=(s.costIncompleteRuns||0)+1; // r30h R30G-05: a lower-bound cost stays marked as one
+  s.ms+=m.ms;s.inTok+=m.inTok;s.outTok+=m.outTok;s.cacheRead+=m.cacheRead;s.cacheWrite+=m.cacheWrite;
   if(m.model)s.model=m.model;
-  s.cost=Math.round((s.cost+m.cost)*10000)/10000;
-  job.metrics.totalCost=Math.round(Object.values(job.metrics.stages).reduce((a,x)=>a+x.cost,0)*10000)/10000;}
+  s.cost=roundUsd(s.cost+m.cost); // r30e: $0.000001 precision (R30D-04)
+  job.metrics.totalCost=roundUsd(Object.values(job.metrics.stages).reduce((a,x)=>a+x.cost,0));
+  const tu=Object.values(job.metrics.stages).reduce((a,x)=>a+(x.costUnknown||0),0);if(tu)job.metrics.totalCostUnknown=roundUsd(tu);}
 function addStageMetrics(job,stage){addRunMetrics(job,stage,callClaude.last)}
 function metricsLine(){const M=S&&S.metrics;if(!M)return '';
   const STAGE_NAME={SCR1:'PO review',VERIFY:'second check',SCR2:'SCR2 audit',FI:'Final Inspection'};
-  const parts=Object.entries(M.stages).map(([k,s])=>(STAGE_NAME[k]||k)+' '+Math.round(s.ms/1000)+'s · $'+s.cost.toFixed(2)+(s.runs>1?' ('+s.runs+' runs)':''));
-  return `<p class="hint" style="margin:2px 0">\u23f1 ${parts.join(' | ')} \u2014 job cost so far $${(M.totalCost||0).toFixed(2)}</p>`}
+  // r30h (R30G-05): known cost, possible extra (billing unknown) and lower bounds (incomplete) are shown distinctly
+  // r30k (R30J-REV-01): every saved value goes through num() / esc() — never straight into markup
+  const parts=Object.entries(M.stages||{}).map(([k,s])=>{s=s||{};const ci=num(s.costIncompleteRuns),ru=num(s.runs),fr=num(s.failedRuns);
+    return esc(STAGE_NAME[k]||k)+' '+Math.round(num(s.ms)/1000)+'s · $'+num(s.cost).toFixed(2)+(num(s.costUnknown)?' + up to $'+num(s.costUnknown).toFixed(2)+' billing unknown':'')+(ci?' (at least — '+ci+' cut-off run'+(ci===1?'':'s')+')':'')+(ru>1?' ('+ru+' runs)':'')+(fr?' · '+fr+' failed':'')});
+  return `<p class="hint" style="margin:2px 0">\u23f1 ${parts.join(' | ')} \u2014 job cost so far $${num(M.totalCost).toFixed(2)}${num(M.totalCostUnknown)?' + up to $'+num(M.totalCostUnknown).toFixed(2)+' billing unknown':''}</p>`}
 function buildJobFromRaw(raw,fname,b64){
   // r30c: FAIL CLOSED — a missing/empty field block is a tooling failure, not a PO with blanks
   if(!raw||typeof raw!=='object'||!raw.wo||typeof raw.wo!=='object'||!Object.keys(raw.wo).length){
@@ -1149,7 +1304,7 @@ function buildJobFromRaw(raw,fname,b64){
 // UNRESOLVED. Shadow results NEVER block, create, or change a gate, and
 // never weaken a HOLD. Same-vendor agreement is NEVER "independently
 // verified" — it is SHADOW / MEASUREMENT ONLY.
-const PILOT={primary:PRIMARY_MODEL,verifier:'claude-sonnet-5', // r30: Opus 5 primary, Sonnet 5 verifier (Tyler 2026-08-10)
+const PILOT={primary:PRIMARY_MODEL,verifier:'claude-sonnet-5', // r30i: the live floor's pair — Opus 4.8 primary, Sonnet 5 verifier (unchanged from r29l)
   verifierTimeoutMs:240000}; // r25b: hard verifier deadline (4 min) — a hung verifier degrades to AUDIT NOT PERFORMED, never a wedged SCR1
 async function scr1Dual(content,label,call){ // `call` injectable so acceptance tests drive the REAL orchestration with fake models
   call=call||callClaude;
@@ -1157,7 +1312,11 @@ async function scr1Dual(content,label,call){ // `call` injectable so acceptance 
   const a=call(DATA.scr1.system,DATA.scr1.tool,content,label,{model:PILOT.primary,metricsOut:pm});
   const b=call(DATA.scr1.system,DATA.scr1.tool,content,'Shadow verify — '+label,{model:PILOT.verifier,metricsOut:vm,timeoutMs:PILOT.verifierTimeoutMs});
   const r=await Promise.allSettled([a,b]); // wait for BOTH before anything renders
-  if(r[0].status==='rejected')throw r[0].reason; // primary failure = job failure (existing behavior)
+  if(r[0].status==='rejected'){ // primary failure = job failure (existing behavior)
+    const err=r[0].reason instanceof Error?r[0].reason:new Error(String(r[0].reason));
+    // r30f (R30E-04): no job exists to hold it, so the spend of BOTH calls rides on the error
+    err.spent={primary:hasSpend(pm)?Object.assign({},pm):null,verify:hasSpend(vm)?Object.assign({},vm):null};
+    throw err;}
   return {raw:r[0].value,pm,vm,
     verify:r[1].status==='fulfilled'?r[1].value:null,
     verifyError:r[1].status==='rejected'?String((r[1].reason&&r[1].reason.message)||r[1].reason):null};
@@ -1430,20 +1589,32 @@ function applyShadowLedger(job){const sh=job.shadow;if(!sh||sh.status!=='COMPLET
       fieldRefs:[],state:'OPEN',res:null,audit:[],
       sp:{label:vi.label,evidence:String(vi.poStates||vi.why||'')}}, // r25d: structured — never parse prose again
       'V|'+shadowTokFree(vi.label)+'|'+shadowTokFree(vi.poStates||vi.why));}}
+// r30f (R30E-05): the shadow record and every ledger explanation built from it
+// name the model that SERVED each call (a refusal fallback can serve the primary
+// on claude-opus-4-8); the requested model is kept beside it.
+// r30g (R30F-REV-06): spend is present when ANY usage, attempt or retry was
+// recorded — never judged from the current attempt's counters alone.
+const hasSpend=m=>!!m&&m.ms!=null&&!!(m.inTok||m.outTok||m.cacheRead||m.cacheWrite||m.cost||m.costUnknown||(m.attempts&&m.attempts.length)||(m.retried&&m.retried.length));
+function servedModels(sh,d){if(!sh)return;
+  const pm=d&&d.pm||{},vm=d&&d.vm||{};
+  if(pm.model){sh.primaryModel=pm.model;if(pm.fallbackFrom)sh.primaryRequested=pm.fallbackFrom}
+  if(vm.model&&!vm.failed){sh.verifierModel=vm.model;if(vm.fallbackFrom)sh.verifierRequested=vm.fallbackFrom}}
 function attachShadow(job,d){
   addRunMetrics(job,'SCR1',d.pm);
   const failed=!!d.verifyError||!d.verify||d.verify.status==='FAILED_INTAKE';
   if(!failed){
     addRunMetrics(job,'VERIFY',d.vm);
     job.shadow=shadowReconcile(d.raw,d.verify,job);
+    servedModels(job.shadow,d); // r30f (R30E-05): credit the model that actually served each side
     applyShadowLedger(job);
   }else{
-    if(d.verify)addRunMetrics(job,'VERIFY',d.vm); // an intake-failed verifier run still spent tokens
+    if(hasSpend(d.vm))addRunMetrics(job,'VERIFY',d.vm); // r30f/r30g (R30E-04, R30F-REV-06): an intake-failed OR rejected verifier run — including one whose spend is only in its retry — is recorded
     // Verifier failure is LOUD and nonblocking: the primary result stands,
     // labeled unaudited — an unaudited result must never look audited.
     job.shadow={pilot:'SAME-VENDOR SHADOW PILOT',status:'AUDIT NOT PERFORMED',
       primaryModel:PILOT.primary,verifierModel:PILOT.verifier,
       error:d.verifyError||'verifier intake failed',at:new Date().toISOString()};
+    servedModels(job.shadow,d);
   }
   return job;
 }
@@ -1452,17 +1623,26 @@ async function extractJob(f){
   const content=[contentBlockFor({name:f.name,b64}),
     {type:'text',text:'Extract this purchase order ('+f.name+'). Read every page, including scanned pages. Return every field; explain any blank with a reason. Call emit_extraction exactly once.'}];
   const d=await scr1Dual(content,'SCR1: '+f.name);
-  if(d.raw.status==='FAILED_INTAKE')throw new Error('Failed intake: '+(d.raw.intakeError||'unreadable PDF'));
-  const job=buildJobFromRaw(d.raw,f.name,b64);
+  // r30g (R30F-REV-06): a completed-but-failed intake, or a job that cannot be built, still spent both calls
+  const spentOf=()=>({primary:hasSpend(d.pm)?Object.assign({},d.pm):null,verify:hasSpend(d.vm)?Object.assign({},d.vm):null});
+  if(d.raw.status==='FAILED_INTAKE')throw Object.assign(new Error('Failed intake: '+(d.raw.intakeError||'unreadable PDF')),{spent:spentOf()});
+  let job;try{job=buildJobFromRaw(d.raw,f.name,b64)}catch(e){if(e&&typeof e==='object'&&!e.spent)e.spent=spentOf();throw e}
   return attachShadow(job,d);
 }
+// r30f (R30E-04): a failed SCR1 extraction has no job to hold its cost, so the
+// spend is stated on the failure itself (batch row / alert detail).
+function spentNote(e){const s=e&&e.spent;if(!s)return '';
+  const c=x=>x?(x.cost||0)+(x.costUnknown||0):0,known=(s.primary?s.primary.cost||0:0)+(s.verify?s.verify.cost||0:0),unk=(s.primary&&s.primary.costUnknown||0)+(s.verify&&s.verify.costUnknown||0);
+  return known||unk?' [API spend on this failed attempt: $'+roundUsd(known).toFixed(4)+(unk?' (+ up to $'+roundUsd(unk).toFixed(4)+' billing unknown)':'')+']':''}
+// r30k (R30J-REV-02): a failed batch row reads like every other failure — the plain sentence first, then the detail and the spend
+function batchFailText(e){return plainFailure(e)+' \u2014 Details for Tyler: '+String((e&&e.message)||e||'')+spentNote(e)}
 // ---- batch (up to 30 POs; each becomes its own distributable instance) ----
 const BATCH={items:[],running:false,next:0};
 async function batchWorker(){
   while(true){const ix=BATCH.next++;if(ix>=BATCH.items.length)break;
     const it=BATCH.items[ix];it.status='extracting';render();
     try{it.job=await extractJob(it.f);it.status='ready';}
-    catch(e){it.status='failed';it.error=e.message}
+    catch(e){it.status='failed';it.error=batchFailText(e)}
     render();}
 }
 async function startBatch(files){
@@ -1474,15 +1654,30 @@ async function startBatch(files){
   const ok=BATCH.items.filter(i=>i.status==='ready').length;
   toast('Batch complete \u2014 '+ok+'/'+BATCH.items.length+' extracted');
 }
-window.openBatchItem=ix=>{S=BATCH.items[ix].job;persistDraft();render()};
+window.openBatchItem=ix=>{if(navBusy())return;S=BATCH.items[ix].job;persistDraft();render()};
 window.saveBatchItem=ix=>{saveInstance(BATCH.items[ix].job)};
 window.saveAllBatch=()=>{let n=0;for(const it of BATCH.items){if(it.job){saveInstance(it.job);n++}}
   toast('\u2713 '+n+' instance file'+(n===1?'':'s')+' downloaded \u2014 distribute them')};
 window.retryBatchItem=async ix=>{const it=BATCH.items[ix];it.status='extracting';it.error=null;render();
-  try{it.job=await extractJob(it.f);it.status='ready'}catch(e){it.status='failed';it.error=e.message}render()};
+  try{it.job=await extractJob(it.f);it.status='ready'}catch(e){it.status='failed';it.error=batchFailText(e)}render()};
 window.clearBatch=()=>{if(BATCH.items.some(i=>i.job&&i.job.stage==='SCR1')&&!confirm('Some POs are not signed off / saved. Clear the batch anyway?'))return;
   BATCH.items=[];S=null;render()};
-window.backToBatch=()=>{S=null;render()};
+// r30j NAV-02 (docs/r30j-plan-2026-10-11.md; r30i's global lock blocked whole SCR1/SCR2
+// batches): ONLY the job whose own SCR2 / Final Inspection audit is running is locked.
+// runScr2/runFi add the job at entry, before any await, and remove it in an outer
+// finally. Background batch work never blocks navigation (r29l behavior). A WeakMap
+// is never serialized, so saved instances and validateImported are unaffected.
+const AUDITING=new WeakMap();
+const jobRef=J=>J&&J.wo?'WO '+J.wo:'PO '+((J&&J.po)||'(no PO yet)');
+// r30k UX-3: waiting is not a failure — a refused action shows a toast, and the job carries a banner while its audit runs (busyBox)
+function navBusy(){if(S&&AUDITING.has(S)){toast('The '+AUDITING.get(S)+' audit on '+jobRef(S)+' is still running \u2014 wait for it to finish.',6000);return true}return false}
+// r30j (R4-01): a single-job audit applies its result ONLY to the job it started on, and
+// only while that job is still the one on screen. A deferred load can still replace the
+// job on screen (r31 item); then nothing is applied to any job and nothing is saved.
+function auditDetached(J,stage,m,cause){m=m||{};
+  const spend=' (API spend on it: $'+roundUsd(m.cost||0).toFixed(4)+(m.costUnknown?' + up to $'+roundUsd(m.costUnknown).toFixed(4)+' billing unknown':'')+(m.costIncomplete?', cost may be incomplete':'')+')';
+  return Object.assign(new Error(stage+' audit on '+jobRef(J)+': the screen moved to another job before the audit finished \u2014 its result was NOT applied to any job and nothing was saved'+spend+'. Open '+jobRef(J)+' again and re-run the audit.'+(cause?' The audit itself had also failed: '+String(cause.message||cause):'')),{detached:true})}
+window.backToBatch=()=>{if(navBusy())return;S=null;render()};
 window.addEventListener('beforeunload',e=>{
   if(BATCH.running||BATCH.items.some(i=>i.job&&i.job.stage==='SCR1')){e.preventDefault();e.returnValue=''}});
 
@@ -1609,6 +1804,7 @@ async function b2Worker(queue){while(queue.length){const it=queue.shift();
   it.status='RUNNING';render();
   const snapshot=JSON.stringify(it.job.ledger); // identity gate: no ledger changes on mismatch
   const c0=(it.job.metrics&&it.job.metrics.totalCost)||0;const t0=Date.now();
+  const u0=(it.job.metrics&&it.job.metrics.totalCostUnknown)||0,n0=b2CutOffRuns(it.job); // r30j REV-05
   try{
     it.job.docs.traveler={name:it.traveler.name,b64:it.traveler.b64};
     await runScr2For(it.job);
@@ -1616,10 +1812,12 @@ async function b2Worker(queue){while(queue.length){const it=queue.shift();
     if(idErr){it.job.ledger=JSON.parse(snapshot);delete it.job.scr2Report;
       it.status='ERROR';it.error='IDENTITY MISMATCH — '+idErr+' (no ledger changes applied)'}
     else{it.status='DONE';it.error=null}
-  }catch(e){it.status='ERROR';it.error=e.message} // one failure never stops the queue
+  }catch(e){it.status='ERROR';it.error=plainFailure(e)+' (details: '+e.message+')'} // one failure never stops the queue
   it.ms=Date.now()-t0;
   it.cost=Math.round((((it.job.metrics&&it.job.metrics.totalCost)||0)-c0)*10000)/10000;
+  it.costUnknown=roundUsd(((it.job.metrics&&it.job.metrics.totalCostUnknown)||0)-u0);it.costIncompleteRuns=b2CutOffRuns(it.job)-n0; // r30j REV-05: this run's possible extra + cut-off runs
   b2Persist();render()}}
+function b2CutOffRuns(j){return Object.values((j&&j.metrics&&j.metrics.stages)||{}).reduce((a,x)=>a+num(x&&x.costIncompleteRuns),0)}
 window.b2Run=async()=>{if(!KEY.v){alert('Activate the API key first.');return}
   if(BATCH2.running)return;
   const queue=BATCH2.items.filter(it=>it.status==='READY');
@@ -1628,13 +1826,13 @@ window.b2Run=async()=>{if(!KEY.v){alert('Activate the API key first.');return}
   await Promise.all([b2Worker(queue),b2Worker(queue)]); // concurrency 2 (§5.1b initial)
   BATCH2.running=false;b2Persist();render();
   toast('Batch SCR2 — '+BATCH2.items.filter(i=>i.status==='DONE').length+' done · '+BATCH2.items.filter(i=>i.status==='ERROR').length+' error')};
-window.b2Open=wo=>{const it=BATCH2.items.find(x=>x.job&&x.job.wo===wo);if(!it)return;
+window.b2Open=wo=>{if(navBusy())return;const it=BATCH2.items.find(x=>x.job&&x.job.wo===wo);if(!it)return;
   S=it.job;persistDraft();render()};
 // r24b (Tyler's r24 finding 1): the active job belongs to Batch SCR2 iff it
 // is one of the batch's own job objects (b2Open sets S by reference). Used by
 // every job view to render an explicit "← Batch SCR2" return control.
 function b2Has(j){return !!j&&BATCH2.items.some(it=>it.job===j)}
-window.b2Back=()=>{S=null;BATCH2.show=true;b2Persist();render()};
+window.b2Back=()=>{if(navBusy())return;S=null;BATCH2.show=true;b2Persist();render()};
 // minimal STORE-mode ZIP (no deps) — §5.1b: ONE archive, never 15 downloads
 function crc32(u8){let c;const t=crc32.t||(crc32.t=(()=>{const t=new Uint32Array(256);
   for(let n=0;n<256;n++){c=n;for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);t[n]=c}return t})());
@@ -1679,7 +1877,7 @@ function viewBatch2(){
     ${B.items.map(it=>`<div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px">
       <span class="mono" style="font-size:12px;flex:1;min-width:230px"><b>WO ${esc(it.job.wo)}</b> · ${esc(it.job.customer)}<br><span class="hint">${esc(it.name)}${it.traveler?' + '+esc(it.traveler.name):''}</span></span>
       ${badge(it.status)}
-      ${it.ms?`<span class="hint">${Math.round(it.ms/1000)}s · $${(it.cost||0).toFixed(2)}</span>`:''}
+      ${num(it.ms)?`<span class="hint">${Math.round(num(it.ms)/1000)}s · $${num(it.cost).toFixed(2)}${num(it.costUnknown)?' + up to $'+num(it.costUnknown).toFixed(2)+' billing unknown':''}${num(it.costIncompleteRuns)?' (at least \u2014 '+num(it.costIncompleteRuns)+' cut-off run'+(num(it.costIncompleteRuns)===1?'':'s')+')':''}</span>`:''}
       ${it.error?`<span class="hint" style="color:var(--bad);flex-basis:100%">${esc(it.error)}</span>`:''}
       <button onclick="b2Open(${escJS(it.job.wo)})">Open</button>
     </div>`).join('')||'<p class="note">No instances loaded yet.</p>'}
@@ -1697,7 +1895,7 @@ window.startScr1Staged=async btn=>{const fs=PENDING.newPo;if(!fs||!fs.length)ret
   if(fs.length===1){
     toast('\u2713 PO submitted \u2014 '+fs[0].name);
     try{S=await extractJob(fs[0]);persistDraft();render();}
-    catch(e){render();alert('SCR1 extraction failed: '+e.message)}
+    catch(e){render();failAlert('SCR1 extraction failed',Object.assign(new Error(String((e&&e.message)||e)+spentNote(e)),{spent:e&&e.spent}))}
   } else { startBatch(fs); }
 };
 const PENDING={};
@@ -1729,6 +1927,10 @@ window.saveField=(k,btn)=>{const ta=btn.parentElement.querySelector('textarea');
     f.entrySrc=(f.k==='receivedDate'&&S.advancePo)?'ADVANCE-PAPERWORK':'ACCESS';
     delete EDITING[k];persistDraft();render();
     toast('Recorded from Access ('+RV.ini+')');return}
+  // r30g (R30F-REV-03, Tyler 2026-10-10): an answer belongs to the value it was given on — an edit RETIRES it
+  // (kept in S.fbRetired with that value) and the edit question is asked again for the new value
+  // r30i (R30H-REV-06): a legacy answer (no v) stays value-less — the value on screen at retirement is recorded separately, never as the answer's value
+  if(S.fb&&S.fb[k]){const old=S.fb[k];(S.fbRetired=S.fbRetired||[]).push(Object.assign({k},old,old.v===undefined?{seenAtRetirement:String(f.v??'')}:{},{retiredAt:today(),retiredBy:RV.ini,why:'value edited after this answer'}));delete S.fb[k]}
   if(f.orig===undefined)f.orig=f.v;
   f.v=nv;f.editedBy=RV.ini;f.editedAt=today();
   if(f.s!=='EXTRACTED'&&f.s!=='NOT_APPLICABLE'){f.s='EXTRACTED';f.why='';f.statusOverridden=true}
@@ -1760,15 +1962,21 @@ window.uploadDoc=async(inp,slot)=>{window.stageDoc(inp,slot)};
 // r21 (§5.1b architecture ruling): the SCR2 audit + mapping path takes an
 // EXPLICIT job object — batch workers receive and return their own job;
 // the global S is never swapped. The single-job flow passes S itself.
-async function runScr2For(job){
+// `here` (r30j R4-01, single-job runs only): checked after the call and BEFORE any mapping —
+// false means the screen moved to another job, so nothing is applied. Batch SCR2 passes none.
+async function runScr2For(job,here){
   const D=job.docs;
   const content=[{type:'text',text:'DOCUMENT 1 — CURRENT PO (PO v1, the comparison authority):'},contentBlockFor(D.po),
     {type:'text',text:'DOCUMENT 2 — COMPLETED TRAVELER (TRAVELER v1, audit subject):'},contentBlockFor(D.traveler)];
   if(D.print){content.push({type:'text',text:'DOCUMENT 3 — PART PRINT (PRINT v1) — CROSS-REFERENCE ONLY, never authority:'},contentBlockFor(D.print));}
   content.push({type:'text',text:'Audit the traveler against the PO. Read every page. Call emit_scr2 exactly once.'});
   const inputs=inputsFor('SCR2',D); // r29j F03: bound at call START
-  const raw=await callClaude(DATA.scr2.system,DATA.scr2.tool,content,'SCR2 audit — '+(job.wo||job.po||''));addStageMetrics(job,'SCR2');
-  if(!inputsMatch(inputs,inputsFor('SCR2',job.docs)))throw new Error('the documents on this job changed while the SCR2 audit was running — the result was DISCARDED (it describes documents no longer on file). Re-run the audit.');
+  const m2={}; // r30i (R30H-REV-03): this call's own metrics — two batch workers never read each other's
+  let raw;try{raw=await callClaude(DATA.scr2.system,DATA.scr2.tool,content,'SCR2 audit — '+(job.wo||job.po||''),{metricsOut:m2});}
+  catch(e){if(e&&e.metrics)addRunMetrics(job,'SCR2',e.metrics);throw e} // r30f (R30E-04): failed spend recorded once
+  addRunMetrics(job,'SCR2',m2);
+  if(here&&!here())throw auditDetached(job,'SCR2',m2);
+  if(!inputsMatch(inputs,inputsFor('SCR2',job.docs)))throw Object.assign(new Error('the documents on this job changed while the SCR2 audit was running — the result was DISCARDED (it describes documents no longer on file). Re-run the audit.'),{spendRecorded:true}); // r30h R30G-06
   job.scr2Report={travelerComparison:raw.travelerComparison||[],
     summary:raw.summary||'',analyzedAt:new Date().toISOString(),inputs};
   closeDocChangeItems(job,'SCR2',inputs);
@@ -1791,14 +1999,20 @@ async function runScr2For(job){
   return job;
 }
 window.runScr2=async()=>{
+  if(navBusy())return; // r30j NAV-02: one audit per job at a time
   if(!KEY.v){alert('Activate the API key first.');return}
-  const D=S.docs;
+  const J=S,D=J.docs;
   if(!D.po){alert('SCR2 refuses to run without the current PO — the PO is the comparison authority.');return}
   if(!D.traveler){alert('SCR2 needs the completed traveler. (Labels are generated at SCR2 and verified at Final Inspection.)');return}
+  AUDITING.set(J,'SCR2');render(); // r30j NAV-02: locked from entry, before any await (r30k UX-3: the banner shows at once)
   try{
-    await runScr2For(S);
-    persistDraft();render();
-  }catch(e){render();alert('SCR2 audit failed: '+e.message)}
+    await runScr2For(J,()=>S===J);
+    if(S===J)persistDraft();render();
+  }catch(e){
+    if(S===J){if(e&&(e.metrics||e.spendRecorded))persistDraft(); // r30g/r30h (R30F-REV-07, R30G-06): any recorded spend of a failed or discarded run is saved to the recovery draft and marks the job dirty
+      render();failAlert('SCR2 audit failed',e)}
+    else{render();failAlert('SCR2 audit failed',e&&e.detached?e:auditDetached(J,'SCR2',e&&e.metrics,e))} // r30j R4-01: never written into the job now on screen
+  }finally{AUDITING.delete(J);render()} // r30k UX-3: redraw AFTER the lock is released, so the banner clears when the audit ends
 };
 // collision-free ledger-id allocator (r7 correction 1): permanent IDs are never
 // derived from a response's array position — a changed/reordered rerun must
@@ -1806,11 +2020,19 @@ window.runScr2=async()=>{
 function nextLedgerId(prefix,J){J=J||S;const used=new Set((J.ledger||[]).map(i=>String(i.id)));
   let n=1;while(used.has(prefix+n))n++;return prefix+n}
 window.runFi=async()=>{
+  if(navBusy())return; // r30j NAV-02: one audit per job at a time
   if(!KEY.v){alert('Activate the API key first.');return}
-  const D=S.docs;
-  const labelFiles=labelDocs(D);
+  // r30j FI-01 (plan review R30I-PLAN-01): the documents this audit reads and the
+  // fingerprints it is bound to are captured ONCE, here, before any await — the request is
+  // built only from this snapshot and compared with the job's CURRENT documents at the end.
+  const J=S,D=Object.assign({},J.docs);
+  const labelFiles=labelDocs(D).slice();if(D.labels!==undefined)D.labels=labelFiles;
   if(!D.po){alert('Final Inspection refuses to run without the current PO.');return}
   if(!D.coc||!D.packSlip||(!labelFiles.length&&!labelsNotRequired())){alert('Final Inspection needs the COC draft, the pack slip, and the generated labels (labels are made at SCR2, verified here). If this WO genuinely requires no labels, record the declaration in the labels card below — reason required.');return}
+  const la=J.labelAttest;
+  const inputs=inputsFor('FI',D); // r29j F03 + r30j FI-01: bound at ENTRY
+  const mf={}; // r30i (R30H-REV-03/04): this call's own metrics, charged to the job that started it
+  AUDITING.set(J,'Final Inspection');render(); // r30j NAV-02: locked from entry — DOCX preparation included (r30k UX-3: banner at once)
   try{
     const content=[{type:'text',text:'DOCUMENT 1 — CURRENT PO (PO v1, the comparison authority):'},contentBlockFor(D.po),
       {type:'text',text:'DOCUMENT 2 — COC DRAFT (COC v1, audit subject):'},contentBlockFor(D.coc),
@@ -1824,35 +2046,40 @@ window.runFi=async()=>{
         }else{content.push({type:'text',text:ref+':'},contentBlockFor(d));}
       }
     }else{
-      const la=S.labelAttest;
       content.push({type:'text',text:'DOCUMENT 5 — GENERATED LABELS: NONE PROVIDED. Labels were declared NOT REQUIRED for this WO (declaration recorded at '+(la.declaredAt||'SCR2')+' by '+la.by+' on '+(la.at||'').slice(0,10)+' — reason: '+la.reason+'). Do NOT raise findings about missing labels or label coverage: return labels as an empty array and labelCoverage with all four arrays empty, and leave the labels column of the traceability matrix blank. Run every other check (COC verbatim vs PO, pack slip vs traveler + PO, traceability across the available documents) exactly as normal.'});
     }
     content.push({type:'text',text:'Audit the COC draft, pack slip, and labels (and traceability across all documents) against the PO. Call emit_final_inspection exactly once.'});
-    const inputs=inputsFor('FI',D); // r29j F03: bound at call START
-    const raw=await callClaude(DATA.fi.system,DATA.fi.tool,content,'Final Inspection audit');addStageMetrics(S,'FI');
-    if(!inputsMatch(inputs,inputsFor('FI',S.docs)))throw new Error('the documents on this job changed while the Final Inspection audit was running — the result was DISCARDED (it describes documents no longer on file). Re-run the audit.');
-    S.fiReport={inputs,cocChecks:raw.cocChecks||[],packSlipChecks:raw.packSlipChecks||[],
+    let raw;try{raw=await callClaude(DATA.fi.system,DATA.fi.tool,content,'Final Inspection audit',{metricsOut:mf});}
+    catch(e){if(e&&e.metrics)addRunMetrics(J,'FI',e.metrics);throw e} // r30f (R30E-04): failed spend recorded once
+    addRunMetrics(J,'FI',mf);
+    if(S!==J)throw auditDetached(J,'Final Inspection',mf); // r30j R4-01: checked BEFORE any mapping
+    if(!inputsMatch(inputs,inputsFor('FI',J.docs)))throw Object.assign(new Error('the documents on this job changed while the Final Inspection audit was running — the result was DISCARDED (it describes documents no longer on file). Re-run the audit.'),{spendRecorded:true}); // r30h R30G-06
+    J.fiReport={inputs,cocChecks:raw.cocChecks||[],packSlipChecks:raw.packSlipChecks||[],
       labels:raw.labels||[],labelCoverage:raw.labelCoverage||{expectedUnits:[],labeledUnits:[],missing:[],extra:[]},
       traceability:(raw.traceability||[]).map(r=>({...r,consistent:r.consistent==='YES'})),
       summary:raw.summary||'',analyzedAt:new Date().toISOString()};
-    closeDocChangeItems(S,'FI',inputs);
+    closeDocChangeItems(J,'FI',inputs);
     const seenNew=new Set(); // within-response exact-fingerprint dedupe only
     (raw.discrepancies||[]).forEach((d,ix)=>{
       if(bareCertSuppressed(d))return; // r20b correction 6: bare standard C-of-C never becomes a ledger item
       const pc=classifyPriceFinding(d); // r20c blocker 1: shared classifier
       if(pc==='ROUTINE_DUP')return;
-      if(pc==='FOLD'){consolidatePrice(d,'FI');return} // r20: one price item per job
-      const disp=findDisposition(d.label||'',d.field||'',d.poValue||'',d.foundValue||'');
+      if(pc==='FOLD'){consolidatePrice(d,'FI',J);return} // r20: one price item per job
+      const disp=findDisposition(d.label||'',d.field||'',d.poValue||'',d.foundValue||'',J);
       if(disp){(disp.carried=disp.carried||[]).push({stage:'FI',at:new Date().toISOString()});return}
-      const ex=findExisting(d.label||'',d.field||'',d.poValue||'',d.foundValue||'');
+      const ex=findExisting(d.label||'',d.field||'',d.poValue||'',d.foundValue||'',J);
       if(ex){maybeSpecialize(ex,d,'FI');return} // already tracked (open/resolved); r20: evidence specializes a generic prior
       const fpKey=norm(d.label||'')+'|'+norm(d.field||'')+'|'+norm(d.poValue||'')+'|'+norm(d.foundValue||'');
       if(seenNew.has(fpKey))return;seenNew.add(fpKey);
-      S.ledger.push({id:nextLedgerId('fi-'),label:d.label||'',field:d.field||'',cls:d.class==='HOLD'?'HOLD':'ALERT',
+      J.ledger.push({id:nextLedgerId('fi-',J),label:d.label||'',field:d.field||'',cls:d.class==='HOLD'?'HOLD':'ALERT',
         gate:GATE_ORDER.includes(d.gate)?d.gate:'FINAL INSPECTION',tier:d.tier||3,act:d.action||'',why:d.why||'',
         from:'FI',poValue:d.poValue||'',foundValue:d.foundValue||'',corrected:d.correctedValue||'',state:'OPEN',res:null,audit:[]});});
     persistDraft();render();
-  }catch(e){render();alert('Final Inspection audit failed: '+e.message)}
+  }catch(e){
+    if(S===J){if(e&&(e.metrics||e.spendRecorded))persistDraft(); // r30g/r30h (R30F-REV-07, R30G-06)
+      render();failAlert('Final Inspection audit failed',e)}
+    else{render();failAlert('Final Inspection audit failed',e&&e.detached?e:auditDetached(J,'Final Inspection',e&&e.metrics,e))} // r30j R4-01
+  }finally{AUDITING.delete(J);render()} // r30k UX-3: redraw AFTER the lock is released, so the banner clears when the audit ends
 };
 
 // ---- ledger (state machine: OPEN / DEFERRED / OVERRIDDEN — OPEN / RESOLVED) ------
@@ -2710,7 +2937,7 @@ function ledgerCard(i,showResolve){
     ${(i.refs&&i.refs.length)?i.refs.map(r=>`<span class="act" title="${escA(r.why||'')}">💲 ${esc(r.from)}: ${esc(r.label)}${(r.po||r.found)?` — PO: ${esc(r.po||'')}${r.found?' · found: '+esc(r.found):''}`:''}</span>`).join(''):''}
     ${st!=='RESOLVED'&&i.poValue?`<span class="act">PO: <code class="copyval mono">${esc(i.poValue)}</code> · found: <code class="copyval mono">${esc(i.foundValue)}</code></span>`:''}
     ${st!=='RESOLVED'&&i.corrected?`<span class="act">Suggested value: <code class="copyval mono">${esc(i.corrected)}</code>
-      <button onclick="copyVal(this,${JSON.stringify(i.corrected).replace(/"/g,'&quot;').replace(/</g,'&lt;')})">Copy</button></span>`:''}
+      <button onclick="copyVal(this,${escJS(i.corrected)})">Copy</button></span>`:''}
     ${i.ise&&st!=='RESOLVED'?`<span class="act" style="color:var(--gold-deep)">PO is silent on this value — acceptable ONLY as an internal controlled source with recorded provenance (resolve with that outcome), per QPC practice. A PO-stated conflict could never be accepted this way.</span>`:''}
     ${st!=='RESOLVED'&&i.ise?f079IseLine(i):''}
     ${st!=='RESOLVED'?f079PoLine(i):''}
@@ -2771,7 +2998,7 @@ function ledgerCard(i,showResolve){
 // attribution stays in the stored instance (technical export).
 function measurementPanel(){
   const sh=(S&&S.ledger?S.ledger:[]).filter(i=>i.shadow||i.from==='VERIFY');
-  const c=S&&S.shadow&&S.shadow.counts?S.shadow.counts:null;
+  const c0=S&&S.shadow&&S.shadow.counts?S.shadow.counts:null,c=c0&&{agree:num(c0.agree),disagree:num(c0.disagree),unresolved:num(c0.unresolved)}; // r30k (R30J-REV-01): pre-existing since r27f
   if(!sh.length&&!c)return '';
   const line=c?`${(c.agree||0)+(c.disagree||0)+(c.unresolved||0)} fields compared · ${c.disagree||0} difference${(c.disagree||0)===1?'':'s'} · ${c.unresolved||0} could not be compared`
     :`${sh.length} comparison record${sh.length===1?'':'s'}`;
@@ -2829,7 +3056,7 @@ window.gateSCR1=()=>{if(needRv())return;
   S.wo=wo.toUpperCase();S.signoffs.push({stage:'SCR1',name:RV.name,ini:RV.ini,date:today()});S.stage='SCR2';
   if(saveInstance()===null){persistDraft();render();return} // r29k: the sign-off stands in this tab and its recovery draft; the FILE does not exist yet — Save again
   render()};
-window.gateSCR2=()=>{if(needRv())return;
+window.gateSCR2=()=>{if(navBusy())return;if(needRv())return; // r30j NAV-02: never signed off while its own audit runs
   if(S.woInvalid){alert('Refused: this instance carries an invalid WO number ("'+String(S.wo).slice(0,40)+'…"). Correct it from Access (banner above) before sign-off.');return}
   const clash=distinct(RV.ini,RV.name);
   if(clash){alert('Refused: the SCR2 reviewer must differ from the '+clash+' reviewer. Independence is a hard rule.');return}
@@ -2839,7 +3066,7 @@ window.gateSCR2=()=>{if(needRv())return;
   S.signoffs.push({stage:'SCR2',name:RV.name,ini:RV.ini,date:today()});S.stage='FI';
   if(saveInstance()===null){persistDraft();render();return} // r29k
   render()};
-window.gateFI=()=>{if(needRv())return;
+window.gateFI=()=>{if(navBusy())return;if(needRv())return; // r30j NAV-02
   if(S.advancePo){alert('Refused: this job is marked ADVANCE PO — parts not physically received. Confirm physical receipt (and run SCR2 on any revised PO), turn the Advance-PO mode off, and re-enter the Received Date from Access before closing.');return}
   if(S.woInvalid){alert('Refused: this instance carries an invalid WO number ("'+String(S.wo).slice(0,40)+'…"). Correct it from Access (banner above) before closing.');return}
   if(!S.fiReport||reportStale('FI')){alert('Refused: there is no Final Inspection report for the documents now on file (a document changed after the audit, or the audit never completed). Re-run the Final Inspection audit.');return} // r29j F02/F03 — checked FIRST: the missing report is the root cause the tech must act on
@@ -2863,7 +3090,8 @@ window.toggleAdvancePo=cb=>{if(cb.checked){if(needRv()){cb.checked=false;return}
       rd.v='';delete rd.enteredBy;delete rd.enteredAt;delete rd.entrySrc;
       toast('Advance-PO mode off — Received Date cleared; re-enter it from Access after physical receipt');}}
   persistDraft();render()};
-window.nextJob=()=>{S=null;clearDraft();CHG.seq=0;CHG.saved=0;CHG.baseline=false;render();
+window.nextJob=()=>{if(navBusy())return; // r30j NAV-02 (R30I-REV-04): never leaves a job whose audit is still running
+  S=null;clearDraft();CHG.seq=0;CHG.saved=0;CHG.baseline=false;render();
   toast('Ready for the next job — API key and identity kept for this tab')};
 window.setCheck=(k,v)=>{S.checklist[k]=v;persistDraft();render()}
 window.recordQtyCheck=()=>{if(needRv())return;
@@ -2925,7 +3153,8 @@ window.fixWo=()=>{if(needRv())return;const v=($('#fix-wo').value||'').trim().toU
   const old=S.wo;S.wo=v;S.woInvalid=undefined;
   (S.history=S.history||[]).push({at:new Date().toISOString(),stage:S.stage,by:RV.ini,what:'WO corrected: "'+String(old).slice(0,40)+'" → '+v});
   persistDraft();render();toast('✓ WO corrected — '+v+' ('+RV.ini+')')}
-function busyBox(){return BUSY.on?`<div class="busy" id="busy-box">⏳ <span id="busy-msg">${esc(BUSY.msg)}</span> — a few minutes; leave this tab open.</div>`:''}
+function busyBox(){const own=S&&AUDITING.has(S);if(!BUSY.on&&!own)return '';
+  return `<div class="busy" id="busy-box">⏳ <span id="busy-msg">${esc(BUSY.on?BUSY.msg:'Preparing the '+AUDITING.get(S)+' audit\u2026')}</span> — a few minutes; leave this tab open.${own?`<br><b id="audit-banner">The ${esc(AUDITING.get(S))} audit on ${esc(jobRef(S))} is running. This job stays open until it finishes: signing off, leaving it and loading another file wait for it.</b>`:''}</div>`}
 function labelDocCard(label,required,accept){const docs=labelDocs();const pend=PENDING.labels;const staged=Array.isArray(pend)?pend:pend?[pend]:[];
   return `<div class="doc-card${docs.length?' doc-ok':required?' doc-missing':''}">
     <span class="doc-type">${docs.length?'✓ ':''}${label}${required?'':' (optional)'}</span>
@@ -3062,18 +3291,21 @@ function viewLanding(){
 // verifier failure renders VERIFY — AUDIT NOT PERFORMED, loudly.
 function shadowPanel(){const sh=S&&S.shadow;if(!sh)return '';
   const M=(S.metrics&&S.metrics.stages)||{};
-  const pc=(M.SCR1&&M.SCR1.cost)||0,vc=(M.VERIFY&&M.VERIFY.cost)||0;
+  const g=(st,f)=>num(M[st]&&M[st][f]); // r30k (R30J-REV-01): saved numbers only as numbers
+  const pc=g('SCR1','cost'),vc=g('VERIFY','cost');
+  const uc=g('SCR1','costUnknown')+g('VERIFY','costUnknown'),ic=g('SCR1','costIncompleteRuns')+g('VERIFY','costIncompleteRuns'); // r30i (R30H-REV-05)
   const head=`<b>SAME-VENDOR SHADOW PILOT</b> <span class="hint">— SHADOW / MEASUREMENT ONLY. Two Anthropic models agreeing is NOT independent verification.</span>`;
   if(sh.status==='AUDIT NOT PERFORMED')
     return `<div class="card" style="border-left:4px solid var(--warn)">${head}<br>
-      <b>VERIFY — AUDIT NOT PERFORMED</b> <span class="hint">— the shadow verifier (${esc(sh.verifierModel||'')}) failed: ${esc(sh.error||'unknown')}. The primary result below is UNAUDITED by the pilot. Nothing is blocked by this.</span></div>`;
-  const c=sh.counts||{agree:0,disagree:0,unresolved:0};
-  const iu=sh.issues?(sh.issues.unresolvedPrimary.length+sh.issues.unresolvedVerify.length):0;
+      <b>VERIFY — AUDIT NOT PERFORMED</b> <span class="hint">— the shadow verifier (${esc(sh.verifierModel||'')}) failed: ${esc(sh.error||'unknown')}. The primary result below is UNAUDITED by the pilot. Nothing is blocked by this.</span>
+      <br><span class="hint">cost: primary $${pc.toFixed(2)} + failed verifier $${vc.toFixed(2)}${uc?' + up to $'+uc.toFixed(2)+' billing unknown':''}${ic?' (at least \u2014 '+ic+' cut-off run'+(ic===1?'':'s')+')':''}</span></div>`; // r30i (R30H-REV-05): a failed verifier's spend is shown too
+  const c0=sh.counts||{},c={agree:num(c0.agree),disagree:num(c0.disagree),unresolved:num(c0.unresolved)}; // r30k (R30J-REV-01)
+  const iu=sh.issues?(num((sh.issues.unresolvedPrimary||[]).length)+num((sh.issues.unresolvedVerify||[]).length)):0;
   return `<div class="card" style="border-left:4px solid var(--navy)">${head}<br>
     <span class="mono" style="font-size:12px">primary ${esc(sh.primaryModel||'')} + verifier ${esc(sh.verifierModel||'')} read this PO independently and concurrently ·
     fields: ${c.agree} agree · ${c.disagree} disagree → ledger · ${c.unresolved} unresolved ·
-    advisory labels: ${(sh.issues&&sh.issues.labelMatches)||0} exact match / ${iu} unresolved ·
-    cost: primary $${pc.toFixed(2)} + verifier $${vc.toFixed(2)} = $${(Math.round((pc+vc)*100)/100).toFixed(2)}</span>
+    advisory labels: ${num(sh.issues&&sh.issues.labelMatches)} exact match / ${iu} unresolved ·
+    cost: primary $${pc.toFixed(2)} + verifier $${vc.toFixed(2)} = $${(Math.round((pc+vc)*100)/100).toFixed(2)}${uc?' + up to $'+uc.toFixed(2)+' billing unknown':''}${ic?' (at least \u2014 '+ic+' cut-off run'+(ic===1?'':'s')+')':''}</span>
     ${c.disagree?`<details style="margin-top:6px" open><summary class="hint" style="color:var(--bad)">${c.disagree} disagreement${c.disagree===1?'':'s'} — both readings and excerpts (also in the ledger below)</summary>
       ${(sh.fields||[]).filter(f=>f.status==='DISAGREE').map(f=>`<div class="hint mono" style="margin:3px 0">${esc(f.k)}: primary "${esc(f.primary||'')}"${f.pExcerpt?' ['+esc(f.pExcerpt)+']':''} · verifier "${esc(f.verify||'')}"${f.vExcerpt?' ['+esc(f.vExcerpt)+']':''}</div>`).join('')}</details>`:''}
     ${c.unresolved?`<details style="margin-top:6px"><summary class="hint">${c.unresolved} unresolved comparison${c.unresolved===1?'':'s'} (status/page/excerpt differs though values match, or a canonical ID is missing — code cannot compare, so it stays UNRESOLVED)</summary>
@@ -3109,7 +3341,7 @@ function viewSCR1(){
         :`<label><input type="checkbox" ${S.verified[f.k]?'checked':''} ${done?'disabled':''}
         onchange="S.verified[${escJS(f.k)}]=this.checked;if(this.checked)delete EXPANDED[${escJS(f.k)}];persistDraft();render()"> verified</label>
         <button ${copyable(f)&&S.verified[f.k]?'':'disabled'} title="${copyable(f)?'Verify first to enable copy':escA('No copy for '+f.s)}"
-          onclick="copyVal(this,${JSON.stringify(f.v).replace(/"/g,'&quot;').replace(/</g,'&lt;')})">Copy</button>`}
+          onclick="copyVal(this,${escJS(f.v)})">Copy</button>`}
         ${!done&&!EDITING[f.k]?`<button title="${f.entry?'Enter the value from the Access receiving record':'Edit the value — the parsed original is kept for the tuning loop'}" onclick="editField(${escJS(f.k)})">${f.entry?'Enter':'✎ Edit'}</button>`:''}</span>
       ${(()=>{const fin=S.ledger.find(x=>(x.state||(x.res?'RESOLVED':'OPEN'))!=='RESOLVED'&&x.fieldRefs&&x.fieldRefs.includes(f.k));
         return fin?`<span class="f-why">⚑ finding: ${esc(fin.label)}${f.why?' — '+esc(f.why):''}</span>`:(f.why?`<span class="f-why">Why: ${esc(f.why)}</span>`:'')})()}
@@ -3143,6 +3375,16 @@ function viewSCR1(){
     </div>`}`
 }
 
+// r30d: one feedback key per comparison row of THIS report (row index + field),
+// stored with the rest of the instance's accuracy feedback.
+// r30e (r30d audit R30D-01): a row verdict is bound to the REPORT it was given
+// on (analyzedAt — every audit run stamps its own) and to the row's FACTS
+// (field, PO value, traveler value, status). A re-run produces new keys, so an
+// old verdict can never display on new facts; it stays in S.accuracy as
+// history, with the facts it judged recorded beside it (setAcc).
+function scr2RowFacts(x){return [x&&x.field,x&&x.poValue,x&&x.travelerValue,x&&x.status].map(v=>String(v??'')).join('\u241f')}
+function scr2RowKey(x,i,rep){rep=rep||(S&&S.scr2Report)||{};
+  return 'scr2::row::'+(rep.analyzedAt||'-')+'::'+i+'::'+docFp(scr2RowFacts(x)).slice(0,12)}
 function viewSCR2(){
   const r=S.scr2Report&&!reportStale('SCR2')?S.scr2Report:null; // r29j F03: a stale report is not a report
   const done=S.stage==='FI'||S.stage==='CLOSED';
@@ -3177,10 +3419,11 @@ function viewSCR2(){
   ${r?`<p class="note" style="background:var(--navysoft);color:var(--ink);padding:10px 12px;border-radius:8px">${esc(r.summary)}</p>
    <h2 style="font-size:13px">Traveler vs. PO</h2>
    <div class="twrap"><table><tr><th>Field</th><th>PO (yardstick)</th><th>Traveler</th><th>Status + your rating</th></tr>
-   ${r.travelerComparison.map(x=>`<tr><td>${esc(x.field)}</td><td class="mono">${esc(x.poValue)||'—'}</td>
+   ${arr(r.travelerComparison).map((x,ri)=>`<tr><td>${esc(x.field)}</td><td class="mono">${esc(x.poValue)||'—'}</td>
      <td class="mono">${esc(x.travelerValue)||'—'}${x.correctionText?`<div class="hint">correction on traveler: “${esc(x.correctionText)}” · initials ${x.correctionInitials==='YES'?'✓':'✗'} · date ${x.correctionDate==='YES'?'✓':'✗'}</div>`:''}</td>
      <td><span class="st st-${x.status==='MATCH'?'M':x.status==='MISMATCH'?'X':'W'}">${esc(x.status)}</span>
-      ${x.note?`<div class="hint">${esc(x.note)}</div>`:''}${rowCovered(x.field,x.field+' '+x.poValue+' '+x.travelerValue)?COVERED_HINT:''}</td></tr>`).join('')}</table></div>`:''}
+      ${x.note?`<div class="hint">${esc(x.note)}</div>`:''}${rowCovered(x.field,x.field+' '+x.poValue+' '+x.travelerValue)?COVERED_HINT:''}
+      ${done?'':accChip(scr2RowKey(x,ri,r),'','row')}</td></tr>`).join('')}</table></div>`:''}
   ${cnCard()}
   ${saveRow()}
   <div class="sec"><h3>SCR2 sign-off</h3><span class="rule"></span></div>
@@ -3191,9 +3434,9 @@ function viewSCR2(){
     <button onclick="nextJob()">Next job → (keeps key + identity)</button></div>`
   :`<div class="checklist">
      <label><input type="checkbox" ${S.labelAttest&&!labelsNotRequired()?'checked':''} onchange="attestLabels(this)">
-       Labels GENERATED in Access for this WO (attestation — they are verified at Final Inspection)${S.labelAttest&&!labelsNotRequired()?` <span class="hint">— ${esc(S.labelAttest.by)} ${(S.labelAttest.at||'').slice(0,10)}</span>`:''}</label>
+       Labels GENERATED in Access for this WO (attestation — they are verified at Final Inspection)${S.labelAttest&&!labelsNotRequired()?` <span class="hint">— ${esc(S.labelAttest.by)} ${esc((S.labelAttest.at||'').slice(0,10))}</span>`:''}</label>
      <label><input type="checkbox" ${labelsNotRequired()?'checked':''} onchange="declareNoLabels(this,'SCR2')">
-       This WO requires NO labels${labelsNotRequired()?` <span class="hint">— ${esc(S.labelAttest.reason)} · ${esc(S.labelAttest.by)} ${(S.labelAttest.at||'').slice(0,10)}</span>`:''}</label>
+       This WO requires NO labels${labelsNotRequired()?` <span class="hint">— ${esc(S.labelAttest.reason)} · ${esc(S.labelAttest.by)} ${esc((S.labelAttest.at||'').slice(0,10))}</span>`:''}</label>
      ${!S.labelAttest?`<input id="nolabel-reason" placeholder="reason — required to declare no labels, recorded with your initials" style="max-width:420px">`:''}
     </div>
     <div class="gatebox">
@@ -3215,7 +3458,7 @@ function viewFI(){
     ['phys','Physical inspection complete (no tool can do this)']];
   const qc=S.qtyCheck;
   const qtyCard=done?'':(qc
-    ?`<div class="card"><b style="font-size:12px">Quantity verification</b> · expected <b>${esc(String(qc.expected))}</b> · counted <b>${esc(String(qc.actual))}</b>${String(qc.expected)!==String(qc.actual)?` · <span style="color:var(--bad)">MISMATCH — ${esc(qc.reason||'')}</span>`:' · <span style="color:var(--ok)">match</span>'} — ${esc(qc.by)} ${(qc.at||'').slice(0,16).replace('T',' ')}
+    ?`<div class="card"><b style="font-size:12px">Quantity verification</b> · expected <b>${esc(String(qc.expected))}</b> · counted <b>${esc(String(qc.actual))}</b>${String(qc.expected)!==String(qc.actual)?` · <span style="color:var(--bad)">MISMATCH — ${esc(qc.reason||'')}</span>`:' · <span style="color:var(--ok)">match</span>'} — ${esc(qc.by)} ${esc((qc.at||'').slice(0,16).replace('T',' '))}
       <button style="margin-left:8px" onclick="delete S.qtyCheck;persistDraft();render()">redo</button></div>`
     :`<div class="card"><b style="font-size:12px">Quantity verification (required to close — ruling 2026-07-16)</b>
       <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
@@ -3240,8 +3483,8 @@ function viewFI(){
     ${docCard('labels','Generated labels',!labelsNotRequired(),'.docx,application/pdf')}
     ${docCard('traveler','Final traveler',false,'application/pdf')}
   </div>
-  ${labelsNotRequired()?`<p class="note" style="color:var(--gold-deep)">Labels declared NOT REQUIRED for this WO at ${esc(S.labelAttest.declaredAt||'SCR2')} by <b>${esc(S.labelAttest.name||S.labelAttest.by)} (${esc(S.labelAttest.by)})</b> on ${(S.labelAttest.at||'').slice(0,10)} — reason: ${esc(S.labelAttest.reason)}. If labels are uploaded anyway they WILL be verified.</p>`
-   :S.labelAttest?`<p class="note">Labels attested generated in Access by <b>${esc(S.labelAttest.name||S.labelAttest.by)} (${esc(S.labelAttest.by)})</b> on ${(S.labelAttest.at||'').slice(0,10)} — verifying them is THIS stage's job.</p>`
+  ${labelsNotRequired()?`<p class="note" style="color:var(--gold-deep)">Labels declared NOT REQUIRED for this WO at ${esc(S.labelAttest.declaredAt||'SCR2')} by <b>${esc(S.labelAttest.name||S.labelAttest.by)} (${esc(S.labelAttest.by)})</b> on ${esc((S.labelAttest.at||'').slice(0,10))} — reason: ${esc(S.labelAttest.reason)}. If labels are uploaded anyway they WILL be verified.</p>`
+   :S.labelAttest?`<p class="note">Labels attested generated in Access by <b>${esc(S.labelAttest.name||S.labelAttest.by)} (${esc(S.labelAttest.by)})</b> on ${esc((S.labelAttest.at||'').slice(0,10))} — verifying them is THIS stage's job.</p>`
    :`<p class="note" style="color:var(--warn)">No SCR2 label attestation on this instance${S.caughtUp?' (caught up mid-stream — labels were generated outside FSCR)':''}.</p>
     ${!done?`<div class="checklist"><label><input type="checkbox" onchange="declareNoLabels(this,'FI')">
       This WO requires NO labels — declare it here (recorded with YOUR initials${S.caughtUp?'; SCR2 was outside FSCR':''})</label>
@@ -3257,23 +3500,23 @@ function viewFI(){
    ${[['COC draft vs. PO','cocChecks','fi::coc::'],['Pack slip vs. traveler + PO','packSlipChecks','fi::packslip::']].map(([t,k,pfx])=>`
    <h2 style="font-size:13px">${t}</h2>
    <div class="twrap"><table><tr><th>Check</th><th>Expected (PO governs)</th><th>Found</th><th>Status + your rating</th></tr>
-   ${r[k].map(x=>`<tr><td>${esc(x.item)}</td><td class="mono">${esc(x.expected)||'—'}</td><td class="mono">${esc(x.found)||'—'}</td>
+   ${arr(r[k]).map(x=>`<tr><td>${esc(x.item)}</td><td class="mono">${esc(x.expected)||'—'}</td><td class="mono">${esc(x.found)||'—'}</td>
      <td><span class="st st-${x.status==='PASS'?'M':x.status==='DISCREPANCY'?'X':'W'}">${esc(x.status)}</span>
      ${x.note?`<div class="hint">${esc(x.note)}</div>`:''}${rowCovered(x.item,x.item+' '+x.expected+' '+x.found)?COVERED_HINT:''}</td></tr>`).join('')}</table></div>`).join('')}
-   ${(!r.labels||!r.labels.length)&&labelsNotRequired()?`<p class="note">Labels — declared NOT REQUIRED for this WO (${esc(S.labelAttest.reason)}); none verified.</p>`:''}
-   ${r.labels&&r.labels.length?`<h2 style="font-size:13px">Labels — coverage ${(r.labelCoverage||{labeledUnits:[]}).labeledUnits.length}/${(r.labelCoverage||{expectedUnits:[]}).expectedUnits.length}
-    ${(r.labelCoverage&&r.labelCoverage.missing.length)?' · MISSING: '+esc(r.labelCoverage.missing.join(', ')):''}
-    ${(r.labelCoverage&&r.labelCoverage.extra.length)?' · EXTRA: '+esc(r.labelCoverage.extra.join(', ')):''}</h2>
-   ${r.labels.map(L=>`<details><summary>${esc(L.labelRef)} · unit ${esc(L.traceabilityUnit)} · <b>${esc(L.status)}</b> —
-      ${L.checks.filter(c=>c.status!=='PASS').map(c=>c.check+': '+c.status).join(', ')||'all checks pass'}</summary>
+   ${!arr(r.labels).length&&labelsNotRequired()?`<p class="note">Labels — declared NOT REQUIRED for this WO (${esc(S.labelAttest.reason)}); none verified.</p>`:''}
+   ${arr(r.labels).length?`<h2 style="font-size:13px">Labels — coverage ${arr((r.labelCoverage||{}).labeledUnits).length}/${arr((r.labelCoverage||{}).expectedUnits).length}
+    ${arr((r.labelCoverage||{}).missing).length?' · MISSING: '+esc(arr(r.labelCoverage.missing).join(', ')):''}
+    ${arr((r.labelCoverage||{}).extra).length?' · EXTRA: '+esc(arr(r.labelCoverage.extra).join(', ')):''}</h2>
+   ${arr(r.labels).map(L=>`<details><summary>${esc(L.labelRef)} · unit ${esc(L.traceabilityUnit)} · <b>${esc(L.status)}</b> —
+      ${esc(arr(L.checks).filter(c=>c&&c.status!=='PASS').map(c=>c.check+': '+c.status).join(', '))||'all checks pass'}</summary>
      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0">
       <div><span class="acc-l">Should read</span><pre class="mono" style="font-size:10px;background:var(--surface2);padding:6px 8px;border-radius:6px;white-space:pre-wrap">${esc(L.shouldRead)}</pre></div>
       <div><span class="acc-l">Actual</span><pre class="mono" style="font-size:10px;background:var(--surface2);padding:6px 8px;border-radius:6px;white-space:pre-wrap">${esc(L.actual)}</pre></div></div>
-     <ul style="margin:4px 0 4px 16px;font-size:11px">${L.checks.map(c=>`<li><b>${esc(c.check)}</b>: ${esc(c.status)}${c.note?' — '+esc(c.note):''}</li>`).join('')}</ul>
+     <ul style="margin:4px 0 4px 16px;font-size:11px">${arr(L.checks).map(c=>`<li><b>${esc(c.check)}</b>: ${esc(c.status)}${c.note?' — '+esc(c.note):''}</li>`).join('')}</ul>
      ${rowCovered('LABEL',L.shouldRead+' '+L.actual)?COVERED_HINT:''}</details>`).join('')}`:''}
    <h2 style="font-size:13px">Traceability across documents</h2>
    <div class="twrap"><table><tr><th>Field</th><th>PO</th><th>Traveler</th><th>Labels</th><th>COC</th><th>Pack slip</th><th>Consistent + rating</th></tr>
-   ${r.traceability.map(x=>`<tr><td>${esc(x.field)}</td><td class="mono">${esc(x.po)}</td><td class="mono">${esc(x.traveler)}</td>
+   ${arr(r.traceability).map(x=>`<tr><td>${esc(x.field)}</td><td class="mono">${esc(x.po)}</td><td class="mono">${esc(x.traveler)}</td>
      <td class="mono">${esc(x.labels)}</td><td class="mono">${esc(x.coc)}</td><td class="mono">${esc(x.packSlip)}</td>
      <td><span class="st st-${x.consistent?'M':'X'}">${x.consistent?'YES':'NO'}</span>
      ${x.note?`<div class="hint">${esc(x.note)}</div>`:''}${rowCovered(x.field,x.field+' '+x.po+' '+x.traveler+' '+x.labels+' '+x.coc+' '+x.packSlip)?COVERED_HINT:''}</td></tr>`).join('')}</table></div>`:''}
@@ -3319,7 +3562,7 @@ function viewBatch(){
   ${idbar()}
   <div class="gatebox">
     <button class="primary" ${BATCH.items.some(i=>i.job)?'':'disabled'} onclick="saveAllBatch()">\u2b07 Download all instances (${BATCH.items.filter(i=>i.job).length})</button>
-    <span class="hint">cumulative batch cost $${BATCH.items.reduce((a,it)=>a+((it.job&&it.job.metrics&&it.job.metrics.totalCost)||0),0).toFixed(2)}</span>
+    <span class="hint">cumulative batch cost $${BATCH.items.reduce((a,it)=>a+num(it.job&&it.job.metrics&&it.job.metrics.totalCost),0).toFixed(2)}${(()=>{const u=BATCH.items.reduce((a,it)=>a+num(it.job&&it.job.metrics&&it.job.metrics.totalCostUnknown),0);return u?' + up to $'+u.toFixed(2)+' billing unknown':''})()}${(()=>{const n=BATCH.items.reduce((a,it)=>a+b2CutOffRuns(it.job),0);return n?' (at least \u2014 '+n+' cut-off run'+(n===1?'':'s')+')':''})()}</span>
     <span class="hint">One file per WO \u2014 hand them out for SCR1 review or onward stages.</span>
     <button onclick="clearBatch()" style="margin-left:auto">Clear batch</button>
   </div>
@@ -3338,7 +3581,7 @@ function viewBatch(){
       <span class="mono" style="font-size:12px;flex:1;min-width:220px">${j?('<b>'+esc(j.po)+'</b> \u00b7 '+esc(j.customer)):esc(it.name)}</span>
       ${badge}
       ${j&&it.status==='ready'&&j.stage==='SCR1'?`<span class="hint">${infoN} information note${infoN===1?'':'s'}</span>`:''}
-      ${it.error?`<span class="hint" style="color:var(--bad)">${esc(it.error.slice(0,70))}</span>`:''}
+      ${it.error?`<span class="hint" style="color:var(--bad)">${esc(it.error.slice(0,70))}</span>${it.error.length>70?`<details class="hint" style="flex-basis:100%"><summary>details</summary><span style="color:var(--bad);white-space:pre-wrap">${esc(it.error)}</span></details>`:''}`:''}
       ${j?`<button class="primary" onclick="openBatchItem(${ix})">Open</button>
            <button onclick="saveBatchItem(${ix})">\ud83d\udcbe Save</button>`:''}
       ${it.status==='failed'?`<button onclick="retryBatchItem(${ix})">Retry</button>`:''}
@@ -3359,6 +3602,23 @@ function keyBar(){
         <button class="primary" onclick="(function(){const k=$('#keybar-in').value.trim();
           if(!/^sk-ant/.test(k)){alert('That does not look like an Anthropic API key.');return}KEY.v=k;render()})()">Activate</button>
         <span class="hint">needed for Run/Extract — reading and feedback work without it</span>`}</div>`}
+// r30k UX-1 (FSCR Plan Review): the floor notice ships INSIDE the build. The first time a browser opens a
+// new build it shows what changed versus the live r29l; "Got it" hides it until the next build. Storage is
+// a per-browser convenience only — if it is blocked the card shows until dismissed for this tab.
+const WHATS_NEW=['The AI is asked for its answer. If a reply comes back without one, the tool asks once more. If there is still no answer you get a plain message and nothing is saved.',
+  'Error messages say what happened in plain words. A failed batch row has a “details” link with the full text.',
+  'SCR2 comparison rows have Useful / Noise buttons. Tap the rows that mattered.',
+  'If you change a field after answering its question, the question comes back for the new value. Marking a verified value “wrong vs the PO” removes its check mark: fix the value, then verify it again before copying.',
+  'While a job’s own SCR2 or Final Inspection audit is running, that job stays open: signing off, leaving it, running it again and loading another file wait until it finishes. Batch work never stops you moving between jobs.',
+  'Final Inspection reads its documents when it starts. If you replace one while it runs, the result is thrown away. Run it again.',
+  'Cost lines may say “billing unknown” or “at least” when the exact cost is not known.'];
+let WN_HIDDEN=false;
+function whatsNewCard(){if(WN_HIDDEN)return '';let seen=null;try{seen=localStorage.getItem('fscr.beta.seenBuild')}catch(e){}
+  if(seen===BUILD.id)return '';
+  return `<div class="card" id="whats-new" style="border-left:4px solid var(--gold)"><b>What changed in this version (${esc(BUILD.id)})</b>
+    <ul style="margin:6px 0 8px 18px;padding:0">${WHATS_NEW.map(t=>`<li style="margin:3px 0">${esc(t)}</li>`).join('')}</ul>
+    <button onclick="dismissWhatsNew()">Got it</button> <span class="hint">Shows once in each browser for every new version.</span></div>`}
+window.dismissWhatsNew=()=>{WN_HIDDEN=true;try{localStorage.setItem('fscr.beta.seenBuild',BUILD.id)}catch(e){}render()};
 function render(){
   updateTopbar();
   $('#who').textContent=S?`stage: ${S.stage}${S.wo?' · WO '+S.wo:''}${S.po?' · PO '+S.po:''}`:'';
@@ -3367,11 +3627,11 @@ function render(){
   // restored from IndexedDB no longer force-route here — they render as a
   // visible Resume chip on the landing screen instead, so "← Start screen"
   // always works and a restart always lands on a recoverable home state.
-  if(!S){m.innerHTML=BATCH.items.length?keyBar()+viewBatch():(BATCH2.show?keyBar()+viewBatch2():viewLanding());return}
-  if(!KEY.v&&(S.stage==='SCR1'&&!S.scr1)){m.innerHTML=viewLanding();return}
-  if(S.stage==='SCR1')m.innerHTML=keyBar()+viewSCR1();
-  else if(S.stage==='SCR2')m.innerHTML=keyBar()+viewSCR2();
-  else m.innerHTML=keyBar()+viewFI();
+  if(!S){m.innerHTML=whatsNewCard()+(BATCH.items.length?keyBar()+viewBatch():(BATCH2.show?keyBar()+viewBatch2():viewLanding()));return}
+  if(!KEY.v&&(S.stage==='SCR1'&&!S.scr1)){m.innerHTML=whatsNewCard()+viewLanding();return}
+  if(S.stage==='SCR1')m.innerHTML=whatsNewCard()+keyBar()+viewSCR1();
+  else if(S.stage==='SCR2')m.innerHTML=whatsNewCard()+keyBar()+viewSCR2();
+  else m.innerHTML=whatsNewCard()+keyBar()+viewFI();
   window.scrollTo({top:document.body.scrollHeight>0?window.scrollY:0});
 }
 window.fscrBeta={get state(){return S},set state(v){S=v;render()},get key(){return !!KEY.v},setKey(k){KEY.v=k;render()},RV};
