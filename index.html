@@ -409,7 +409,7 @@ function freshInstance(){return {schema:'qpc.fscr.beta/v2',createdAt:new Date().
 // asserts the zip name matches BUILD.id). Rendered in the footer so the floor
 // can see which build a tab is running; stamped into every saved instance so
 // harvests carry build attribution.
-const BUILD={id:'r30m',updated:'2026-10-12'};
+const BUILD={id:'r30p',updated:'2026-11-10'};
 addEventListener('DOMContentLoaded',()=>{const el=document.getElementById('build-stamp');
   if(el)el.textContent='FSCR Beta — build '+BUILD.id+' · updated '+BUILD.updated+' · if the floor announcement names a newer build, refresh this tab.'});
 const CHG={seq:0,saved:0,baseline:false};
@@ -631,6 +631,26 @@ function validateImported(o){
         if(typeof d.b64!=='string'||/[^A-Za-z0-9+\/=\r\n]/.test(d.b64))B('document bytes in '+s+' are not base64')}}}
   if(o.signoffs!==undefined){if(!Array.isArray(o.signoffs))B('signoffs not an array');else for(const s of o.signoffs){if(!isObj(s)){B('sign-off not an object');continue}en(s.stage,['SCR1','SCR2','FI'],'sign-off stage');str(s.name,'sign-off name',120);str(s.ini,'sign-off initials',20)}}
   if(o.history!==undefined&&!Array.isArray(o.history))B('history not an array');
+  // r30n (B4): a run record's failure code is one of the app's own codes — nothing else is accepted
+  if(o.stageBuildRuns!==undefined&&o.stageBuildRuns!==null){if(!Array.isArray(o.stageBuildRuns))B('stageBuildRuns not a list');
+    else for(const r of o.stageBuildRuns){if(!isObj(r)){B('run record not an object');continue}
+      if(r.failure!==undefined&&r.failure!==null)en(r.failure,FAILURE_CODES,'run failure code')}}
+  // r30n (B1): the hand-off list written at SCR2 sign-off — known names only, each value held to the
+  // same shape and limit as the ledger field it was copied from; the page escapes every one it prints
+  if(o.handoff!==undefined&&o.handoff!==null){const H=o.handoff;
+    if(!isObj(H))B('handoff not an object');
+    else{for(const k of Object.keys(H))if(!['at','by','build','items'].includes(k))B('handoff field '+q(k));
+      str(H.at,'handoff at',40);str(H.by,'handoff by',40);str(H.build,'handoff build',40);
+      if(!Array.isArray(H.items))B('handoff items not a list');
+      else for(const it of H.items){if(!isObj(it)){B('handoff item not an object');continue}
+        for(const k of Object.keys(it))if(!HANDOFF_FIELDS.includes(k))B('handoff item field '+q(k));
+        id(it.id,'handoff item id');if(it.kind!==undefined&&it.kind!==null)id(it.kind,'handoff item kind');
+        en(it.cls,['HOLD','ALERT'],'handoff item class');en(it.state,LEDGER_STATES,'handoff item state');
+        for(const g of ['gate','effGate','deferredTo'])if(it[g]!==undefined&&it[g]!==null&&!GATE_ORDER.includes(it[g]))B('handoff item '+g+' '+q(it[g]));
+        str(it.label,'handoff item label',2000);str(it.why,'handoff item why');str(it.act,'handoff item action');
+        if(it.exception!==undefined&&it.exception!==null){const x=it.exception;
+          if(!isObj(x))B('handoff exception not an object');
+          else for(const k of Object.keys(x)){if(!HANDOFF_EXCEPTION_FIELDS.includes(k)){B('handoff exception field '+q(k));continue}str(x[k],'handoff exception '+k)}}}}}
   for(const st of ['scr2Report','fiReport']){const r=o[st];if(r!==undefined&&r!==null&&!isObj(r))B(st+' not an object')}
   // r30m (R30L-REV-02): job records the screens print are objects of text fields (survey 2026-10-12, 1,825 files: zero violations)
   const rec=(v,what,fields,extra)=>{if(v===undefined||v===null)return;if(!isObj(v)){B(what+' not an object');return}
@@ -913,7 +933,7 @@ async function callClaude(system,tool,content,label,opts){
             rej(Object.assign(new Error('aborted'),{name:'AbortError'}))}});
         continue;
       }
-      const e=await resp.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||('API error HTTP '+resp.status));
+      const e=await resp.json().catch(()=>({}));throw Object.assign(new Error((e.error&&e.error.message)||('API error HTTP '+resp.status)),{httpStatus:resp.status}); // r30n B4: the status classifies the failure even when the API text does not name it
     }
     const reader=resp.body.getReader();const dec=new TextDecoder();let buf='',json='';
     // r29j (audit 2026-09-06 F02): a reply that never opens the forced tool
@@ -985,8 +1005,14 @@ async function callClaude(system,tool,content,label,opts){
     // failed result is never mapped to a report, gate or ledger.
     const used=_m.inTok||_m.outTok||_m.cacheRead||_m.cacheWrite||iters;
     if(used&&!settled){if(!_m.ms)_m.ms=Date.now()-_t0;settle();} // r30g (R30F-REV-05): observed usage is always costed
-    if(used||_m.attempts||prior.length){if(!_m.ms)_m.ms=Date.now()-_t0;addPrior();
-      _m.failed=true;e.metrics=Object.assign({},_m);if(opts&&opts.metricsOut)Object.assign(opts.metricsOut,_m);}
+    // r30n (B4): EVERY failed call carries metrics — one with no usage at all (key refused, service busy
+    // through every retry, no connection, a deadline before any event) is a zero-token, zero-cost failed
+    // run, so the stage that asked can record why it failed. Costing of observed usage is unchanged.
+    if(e===null||typeof e!=='object')e=new Error(String(e));
+    if(!_m.ms)_m.ms=Date.now()-_t0;
+    if(used||_m.attempts||prior.length)addPrior();
+    _m.failed=true;_m.failure=failureCode(e);
+    e.metrics=Object.assign({},_m);if(opts&&opts.metricsOut)Object.assign(opts.metricsOut,_m);
     throw e;
   }finally{if(_kill)clearTimeout(_kill);BUSY.count--;BUSY.on=BUSY.count>0;if(!BUSY.on)BUSY.msg='';}
 }
@@ -1022,17 +1048,35 @@ function toolResultError(tool,out){
   return null}
 // r30d (harvest 2026-09-23 / UX review): the floor sees what happened and what to
 // do in plain words; the exact technical message follows for Tyler.
-function plainFailure(e){const t=String((e&&e.message)||e||'');
-  if(/screen moved to another job before the audit finished/i.test(t))return 'The screen moved to another job before this audit finished, so its result was not applied to any job and nothing was saved. Open that job again and run the audit again.'; // r30j R4-01
-  if(/changed while the .* audit was running/i.test(t))return 'A document on this job changed while the audit was running, so the result was thrown away. Run the audit again.';
-  if(/DECLINED|stop_reason refusal/i.test(t))return 'The AI declined to process these documents. Nothing was saved. Tell Tyler the job number and what you uploaded.';
-  if(/timeout|aborted/i.test(t))return 'The audit took too long and was stopped. Nothing was saved. Run it again.';
-  if(/rate limit|overloaded|HTTP 429|HTTP 529|HTTP 503/i.test(t))return 'The AI service is busy right now. Nothing was saved. Wait a minute and run it again.';
-  if(/api key|x-api-key|authentication|HTTP 401|HTTP 403/i.test(t))return 'The API key was not accepted. Re-enter the key in the bar at the top, then run it again.';
-  if(/failed to fetch|networkerror|network|load failed/i.test(t))return 'Could not reach the AI service. Check the internet connection and run it again.';
-  if(/NO emit_|ended before|cut off at the output limit|not valid JSON|malformed|EMPTY|no field block/i.test(t))return 'The audit came back incomplete. Nothing was saved. Run it again. If it happens twice on the same job, tell Tyler.';
-  return 'The step did not finish. Nothing was saved. Run it again. If it keeps happening, tell Tyler.'}
-function failAlert(what,e){alert(what+' — '+plainFailure(e)+'\n\nDetails for Tyler: '+String((e&&e.message)||e||''))}
+// r30n (B4): ONE classifier. The plain sentence the floor reads and the failure code a run
+// record keeps come from the same decision, in the same order as before. No API text is stored.
+const FAILURE_CODES=['INCOMPLETE','DECLINED','TIMEOUT','BUSY','KEY','NETWORK','DOC_CHANGED','DETACHED','OTHER'];
+function failureCode(e){
+  if(e&&typeof e==='object'&&FAILURE_CODES.includes(e.failure))return e.failure; // set where the cause is known exactly
+  const t=String((e&&e.message)||e||''),h=e&&typeof e==='object'?e.httpStatus:undefined;
+  if(/screen moved to another job before the audit finished/i.test(t))return 'DETACHED'; // r30j R4-01
+  if(/changed while the .* audit was running/i.test(t))return 'DOC_CHANGED';
+  if(/DECLINED|stop_reason refusal/i.test(t))return 'DECLINED';
+  if(/timeout|aborted/i.test(t))return 'TIMEOUT';
+  if(h===429||h===529||h===503||/rate limit|overloaded|HTTP 429|HTTP 529|HTTP 503/i.test(t))return 'BUSY';
+  if(h===401||h===403||/api key|x-api-key|authentication|HTTP 401|HTTP 403/i.test(t))return 'KEY';
+  if(/failed to fetch|networkerror|network|load failed/i.test(t))return 'NETWORK';
+  if(/NO emit_|ended before|cut off at the output limit|not valid JSON|malformed|EMPTY|no field block/i.test(t))return 'INCOMPLETE';
+  return 'OTHER'}
+const FAILURE_PLAIN={
+  DETACHED:'The screen moved to another job before this audit finished, so its result was not applied to any job and nothing was saved. Open that job again and run the audit again.',
+  DOC_CHANGED:'A document on this job changed while the audit was running, so the result was thrown away. Run the audit again.',
+  DECLINED:'The AI declined to process these documents. Nothing was saved. Tell Tyler the job number and what you uploaded.',
+  TIMEOUT:'The audit took too long and was stopped. Nothing was saved. Run it again.',
+  BUSY:'The AI service is busy right now. Nothing was saved. Wait a minute and run it again.',
+  KEY:'The API key was not accepted. Re-enter the key in the bar at the top, then run it again.',
+  NETWORK:'Could not reach the AI service. Check the internet connection and run it again.',
+  INCOMPLETE:'The audit came back incomplete. Nothing was saved. Run it again. If it happens twice on the same job, tell Tyler.',
+  OTHER:'The step did not finish. Nothing was saved. Run it again. If it keeps happening, tell Tyler.'};
+function plainFailure(e){return FAILURE_PLAIN[failureCode(e)]}
+// a completed reply whose result is thrown away (documents changed / screen moved) is a FAILED run with its real cost
+function discardedRun(m,code){return Object.assign({},m,{failed:true,failure:code})}
+function failAlert(what,e){alert(what+' — '+plainFailure(e)+'\n\nDetails for Tyler: '+String((e&&e.message)||e||'')+' [code '+failureCode(e)+']')}
 const fileB64=f=>new Promise((res,rej)=>{const r=new FileReader();
   r.onload=()=>res(String(r.result).slice(String(r.result).indexOf(',')+1));r.onerror=()=>rej(r.error);r.readAsDataURL(f)});
 const pdfBlock=b64=>({type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}});
@@ -1140,7 +1184,7 @@ function addRunMetrics(job,stage,m){if(!m||!job||m.ms==null)return;
   const sbr=(job.stageBuildRuns=job.stageBuildRuns||[]); // r19: one entry per ACTUAL stage run — reruns append, never overwrite
   sbr.push(Object.assign({stage,buildId:BUILD.id,at:new Date().toISOString(),runNumber:sbr.filter(x=>x.stage===stage).length+1,model:m.model||''},
     m.attempts?{attempts:m.attempts,fallbackFrom:m.fallbackFrom||null}:{},
-    m.retried?{retried:m.retried}:{},m.failed?{failed:true}:{},m.costUnknown?{costUnknown:m.costUnknown}:{},m.costIncomplete?{costIncomplete:true}:{},m.refusalCategory!==undefined?{refusalCategory:m.refusalCategory}:{})); // r30e/r30f: every attempt, retry and failed run stays on the record
+    m.retried?{retried:m.retried}:{},m.failed?{failed:true,failure:FAILURE_CODES.includes(m.failure)?m.failure:'OTHER'}:{},m.costUnknown?{costUnknown:m.costUnknown}:{},m.costIncomplete?{costIncomplete:true}:{},m.refusalCategory!==undefined?{refusalCategory:m.refusalCategory}:{})); // r30e/r30f: every attempt, retry and failed run stays on the record
   job.metrics=job.metrics||{stages:{}};
   const s=job.metrics.stages[stage]=job.metrics.stages[stage]||{runs:0,ms:0,inTok:0,outTok:0,cacheRead:0,cacheWrite:0,cost:0};
   if(m.failed)s.failedRuns=(s.failedRuns||0)+1;else s.runs++; // r30f: a failed run is spend, not a completed run
@@ -1196,7 +1240,7 @@ function buildJobFromRaw(raw,fname,b64){
         else{const out=normalizeDescription(f.v);if(out!==f.v){f.src=f.v;f.v=out;}}}
       if(d.key==='currentPrice'&&st==='EXTRACTED'&&f.v){
         f.src=f.v;f.v='0.00';
-        f.why='PO states '+f.src+' \u2014 DB entry stays $0.00 until price verification closes (verified at Final Inspection).';}
+        f.why='PO states '+f.src+' \u2014 DB entry stays $0.00 until price verification closes (carried on the still-open list after SCR2).';} // r30o (R30N-REV-03): new jobs only — saved jobs keep the words they were saved with
       if(lineIsExpedite&&d.key==='partId'){f.isExp=true}
       fields.push(f);}
     const pm=String((((li.fields||{}).currentPrice||{}).value)||'').replace(/[$,]/g,'').match(/-?\d+(\.\d+)?/);
@@ -1306,6 +1350,14 @@ function buildJobFromRaw(raw,fname,b64){
 // verified" — it is SHADOW / MEASUREMENT ONLY.
 const PILOT={primary:PRIMARY_MODEL,verifier:'claude-sonnet-5', // r30i: the live floor's pair — Opus 4.8 primary, Sonnet 5 verifier (unchanged from r29l)
   verifierTimeoutMs:240000}; // r25b: hard verifier deadline (4 min) — a hung verifier degrades to AUDIT NOT PERFORMED, never a wedged SCR1
+// r30n (B3, Tyler 2026-11-10 "yes to all" — decision 2: the shadow verifier stops): the floor makes
+// ONE SCR1 call. scr1Dual / attachShadow / shadowReconcile stay in the file, off the floor path, so
+// saved instances that carry comparison data still load and display and the pilot's tests still run.
+const SHADOW_PILOT=false;
+async function scr1Single(content,label,call){call=call||callClaude;const pm={};
+  try{return {raw:await call(DATA.scr1.system,DATA.scr1.tool,content,label,{model:PILOT.primary,metricsOut:pm}),pm,vm:{},verify:null,verifyError:null}}
+  catch(e0){const err=(e0&&typeof e0==='object')?e0:new Error(String(e0));
+    err.spent={primary:hasSpend(pm)?Object.assign({},pm):null,verify:null};throw err}}
 async function scr1Dual(content,label,call){ // `call` injectable so acceptance tests drive the REAL orchestration with fake models
   call=call||callClaude;
   const pm={},vm={};
@@ -1622,11 +1674,12 @@ async function extractJob(f){
   const b64=await fileB64(f);
   const content=[contentBlockFor({name:f.name,b64}),
     {type:'text',text:'Extract this purchase order ('+f.name+'). Read every page, including scanned pages. Return every field; explain any blank with a reason. Call emit_extraction exactly once.'}];
-  const d=await scr1Dual(content,'SCR1: '+f.name);
+  const d=SHADOW_PILOT?await scr1Dual(content,'SCR1: '+f.name):await scr1Single(content,'SCR1: '+f.name);
   // r30g (R30F-REV-06): a completed-but-failed intake, or a job that cannot be built, still spent both calls
   const spentOf=()=>({primary:hasSpend(d.pm)?Object.assign({},d.pm):null,verify:hasSpend(d.vm)?Object.assign({},d.vm):null});
   if(d.raw.status==='FAILED_INTAKE')throw Object.assign(new Error('Failed intake: '+(d.raw.intakeError||'unreadable PDF')),{spent:spentOf()});
   let job;try{job=buildJobFromRaw(d.raw,f.name,b64)}catch(e){if(e&&typeof e==='object'&&!e.spent)e.spent=spentOf();throw e}
+  if(!SHADOW_PILOT){addRunMetrics(job,'SCR1',d.pm);return job} // r30n B3: no shadow object, no VERIFY run, no comparison items
   return attachShadow(job,d);
 }
 // r30f (R30E-04): a failed SCR1 extraction has no job to hold its cost, so the
@@ -1635,7 +1688,7 @@ function spentNote(e){const s=e&&e.spent;if(!s)return '';
   const c=x=>x?(x.cost||0)+(x.costUnknown||0):0,known=(s.primary?s.primary.cost||0:0)+(s.verify?s.verify.cost||0:0),unk=(s.primary&&s.primary.costUnknown||0)+(s.verify&&s.verify.costUnknown||0);
   return known||unk?' [API spend on this failed attempt: $'+roundUsd(known).toFixed(4)+(unk?' (+ up to $'+roundUsd(unk).toFixed(4)+' billing unknown)':'')+']':''}
 // r30k (R30J-REV-02): a failed batch row reads like every other failure — the plain sentence first, then the detail and the spend
-function batchFailText(e){return plainFailure(e)+' \u2014 Details for Tyler: '+String((e&&e.message)||e||'')+spentNote(e)}
+function batchFailText(e){return plainFailure(e)+' \u2014 Details for Tyler: '+String((e&&e.message)||e||'')+spentNote(e)+' [code '+failureCode(e)+']'} // r30n B4: SCR1 has no job to keep a failed run on, so the code is shown here only (not saved)
 // ---- batch (up to 30 POs; each becomes its own distributable instance) ----
 const BATCH={items:[],running:false,next:0};
 async function batchWorker(){
@@ -1676,7 +1729,7 @@ function navBusy(){if(S&&AUDITING.has(S)){toast('The '+AUDITING.get(S)+' audit o
 // job on screen (r31 item); then nothing is applied to any job and nothing is saved.
 function auditDetached(J,stage,m,cause){m=m||{};
   const spend=' (API spend on it: $'+roundUsd(m.cost||0).toFixed(4)+(m.costUnknown?' + up to $'+roundUsd(m.costUnknown).toFixed(4)+' billing unknown':'')+(m.costIncomplete?', cost may be incomplete':'')+')';
-  return Object.assign(new Error(stage+' audit on '+jobRef(J)+': the screen moved to another job before the audit finished \u2014 its result was NOT applied to any job and nothing was saved'+spend+'. Open '+jobRef(J)+' again and re-run the audit.'+(cause?' The audit itself had also failed: '+String(cause.message||cause):'')),{detached:true})}
+  return Object.assign(new Error(stage+' audit on '+jobRef(J)+': the screen moved to another job before the audit finished \u2014 its result was NOT applied to any job and nothing was saved'+spend+'. Open '+jobRef(J)+' again and re-run the audit.'+(cause?' The audit itself had also failed: '+String(cause.message||cause):'')),{detached:true,failure:'DETACHED'})}
 window.backToBatch=()=>{if(navBusy())return;S=null;render()};
 window.addEventListener('beforeunload',e=>{
   if(BATCH.running||BATCH.items.some(i=>i.job&&i.job.stage==='SCR1')){e.preventDefault();e.returnValue=''}});
@@ -1812,7 +1865,7 @@ async function b2Worker(queue){while(queue.length){const it=queue.shift();
     if(idErr){it.job.ledger=JSON.parse(snapshot);delete it.job.scr2Report;
       it.status='ERROR';it.error='IDENTITY MISMATCH — '+idErr+' (no ledger changes applied)'}
     else{it.status='DONE';it.error=null}
-  }catch(e){it.status='ERROR';it.error=plainFailure(e)+' (details: '+e.message+')'} // one failure never stops the queue
+  }catch(e){it.status='ERROR';it.error=plainFailure(e)+' (details: '+e.message+') [code '+failureCode(e)+']'} // one failure never stops the queue
   it.ms=Date.now()-t0;
   it.cost=Math.round((((it.job.metrics&&it.job.metrics.totalCost)||0)-c0)*10000)/10000;
   it.costUnknown=roundUsd(((it.job.metrics&&it.job.metrics.totalCostUnknown)||0)-u0);it.costIncompleteRuns=b2CutOffRuns(it.job)-n0; // r30j REV-05: this run's possible extra + cut-off runs
@@ -1895,7 +1948,7 @@ window.startScr1Staged=async btn=>{const fs=PENDING.newPo;if(!fs||!fs.length)ret
   if(fs.length===1){
     toast('\u2713 PO submitted \u2014 '+fs[0].name);
     try{S=await extractJob(fs[0]);persistDraft();render();}
-    catch(e){render();failAlert('SCR1 extraction failed',Object.assign(new Error(String((e&&e.message)||e)+spentNote(e)),{spent:e&&e.spent}))}
+    catch(e){render();failAlert('SCR1 extraction failed',Object.assign(new Error(String((e&&e.message)||e)+spentNote(e)),{spent:e&&e.spent,failure:failureCode(e)}))}
   } else { startBatch(fs); }
 };
 const PENDING={};
@@ -1974,9 +2027,12 @@ async function runScr2For(job,here){
   const m2={}; // r30i (R30H-REV-03): this call's own metrics — two batch workers never read each other's
   let raw;try{raw=await callClaude(DATA.scr2.system,DATA.scr2.tool,content,'SCR2 audit — '+(job.wo||job.po||''),{metricsOut:m2});}
   catch(e){if(e&&e.metrics)addRunMetrics(job,'SCR2',e.metrics);throw e} // r30f (R30E-04): failed spend recorded once
+  // r30n (B4): the run is recorded ONCE, after the result is known to be kept. A result thrown away
+  // (screen moved, documents changed) is a FAILED run with its code and its real cost — never a success.
+  if(here&&!here()){addRunMetrics(job,'SCR2',discardedRun(m2,'DETACHED'));throw auditDetached(job,'SCR2',m2)}
+  if(!inputsMatch(inputs,inputsFor('SCR2',job.docs))){addRunMetrics(job,'SCR2',discardedRun(m2,'DOC_CHANGED'));
+    throw Object.assign(new Error('the documents on this job changed while the SCR2 audit was running — the result was DISCARDED (it describes documents no longer on file). Re-run the audit.'),{spendRecorded:true,failure:'DOC_CHANGED'})} // r30h R30G-06
   addRunMetrics(job,'SCR2',m2);
-  if(here&&!here())throw auditDetached(job,'SCR2',m2);
-  if(!inputsMatch(inputs,inputsFor('SCR2',job.docs)))throw Object.assign(new Error('the documents on this job changed while the SCR2 audit was running — the result was DISCARDED (it describes documents no longer on file). Re-run the audit.'),{spendRecorded:true}); // r30h R30G-06
   job.scr2Report={travelerComparison:raw.travelerComparison||[],
     summary:raw.summary||'',analyzedAt:new Date().toISOString(),inputs};
   closeDocChangeItems(job,'SCR2',inputs);
@@ -2003,7 +2059,7 @@ window.runScr2=async()=>{
   if(!KEY.v){alert('Activate the API key first.');return}
   const J=S,D=J.docs;
   if(!D.po){alert('SCR2 refuses to run without the current PO — the PO is the comparison authority.');return}
-  if(!D.traveler){alert('SCR2 needs the completed traveler. (Labels are generated at SCR2 and verified at Final Inspection.)');return}
+  if(!D.traveler){alert('SCR2 needs the completed traveler. (Labels are generated at SCR2; verifying them goes on the still-open list.)');return}
   AUDITING.set(J,'SCR2');render(); // r30j NAV-02: locked from entry, before any await (r30k UX-3: the banner shows at once)
   try{
     await runScr2For(J,()=>S===J);
@@ -2051,9 +2107,11 @@ window.runFi=async()=>{
     content.push({type:'text',text:'Audit the COC draft, pack slip, and labels (and traceability across all documents) against the PO. Call emit_final_inspection exactly once.'});
     let raw;try{raw=await callClaude(DATA.fi.system,DATA.fi.tool,content,'Final Inspection audit',{metricsOut:mf});}
     catch(e){if(e&&e.metrics)addRunMetrics(J,'FI',e.metrics);throw e} // r30f (R30E-04): failed spend recorded once
+    // r30n (B4): recorded ONCE, after the keep/discard decision (same rule as SCR2)
+    if(S!==J){addRunMetrics(J,'FI',discardedRun(mf,'DETACHED'));throw auditDetached(J,'Final Inspection',mf)} // r30j R4-01: checked BEFORE any mapping
+    if(!inputsMatch(inputs,inputsFor('FI',J.docs))){addRunMetrics(J,'FI',discardedRun(mf,'DOC_CHANGED'));
+      throw Object.assign(new Error('the documents on this job changed while the Final Inspection audit was running — the result was DISCARDED (it describes documents no longer on file). Re-run the audit.'),{spendRecorded:true,failure:'DOC_CHANGED'})} // r30h R30G-06
     addRunMetrics(J,'FI',mf);
-    if(S!==J)throw auditDetached(J,'Final Inspection',mf); // r30j R4-01: checked BEFORE any mapping
-    if(!inputsMatch(inputs,inputsFor('FI',J.docs)))throw Object.assign(new Error('the documents on this job changed while the Final Inspection audit was running — the result was DISCARDED (it describes documents no longer on file). Re-run the audit.'),{spendRecorded:true}); // r30h R30G-06
     J.fiReport={inputs,cocChecks:raw.cocChecks||[],packSlipChecks:raw.packSlipChecks||[],
       labels:raw.labels||[],labelCoverage:raw.labelCoverage||{expectedUnits:[],labeledUnits:[],missing:[],extra:[]},
       traceability:(raw.traceability||[]).map(r=>({...r,consistent:r.consistent==='YES'})),
@@ -2588,6 +2646,65 @@ function presentationFor(i,stage){
     ||!!i.corrected||!!i.poValue
     ||GATE_ORDER.indexOf(g)>=GATE_ORDER.indexOf('PACKAGING');
   return required?{state:'REQUIRED_BY',due,dueNow}:{state:'INFORMATION'};}
+// ---- r30n (B1, Tyler 2026-11-10: "it ends at SCR2") — the hand-off list ----------------------
+// FSCR finishes at SCR2. What Final Inspection would have had to clear is handed over as a
+// list: every ledger item the obligation function still calls STOP NOW or REQUIRED at 'FI'
+// (price checks, material proceed-at-risk, findings due at final inspection / ship / operations
+// planning, document-change items). Nothing about what blocks SCR2 changes, and the stage
+// value written after SCR2 sign-off stays 'FI'.
+const HANDOFF_FIELDS=['id','kind','label','cls','state','gate','effGate','deferredTo','why','act','exception'];
+const HANDOFF_EXCEPTION_FIELDS=['approver','reason','at','by','aref','accessRef'];
+function handoffItem(i){
+  const o={id:String(i.id),kind:i.kind||null,label:String(i.label||''),cls:i.cls||null,state:i.state||(i.res?'RESOLVED':'OPEN'),
+    gate:i.gate||null,effGate:effGate(i)||null,deferredTo:i.deferredTo||null,why:String(i.why||''),act:String(i.act||'')};
+  // an OVERRIDDEN item carries its authorization: who approved, why, when, who recorded it, and the reference
+  if(o.state==='OVERRIDDEN'&&i.override&&typeof i.override==='object'){const v=i.override,x={};
+    for(const k of ['approver','reason','at','by'])x[k]=String(v[k]??'');
+    if(v.aref!==undefined&&v.aref!==null)x.aref=String(v.aref);
+    if(v.accessRef!==undefined&&v.accessRef!==null)x.accessRef=String(v.accessRef);
+    o.exception=x}
+  return o}
+// PURE: reads the job, changes nothing. Comparison (shadow) items, information and resolved items are never on it.
+function stillOpen(job){
+  const items=(job&&Array.isArray(job.ledger)?job.ledger:[]).filter(i=>{
+    if(!i||i.shadow||i.from==='VERIFY')return false;
+    if((i.state||(i.res?'RESOLVED':'OPEN'))==='RESOLVED')return false;
+    const p=presentationFor(i,'FI');return p.state==='STOP_NOW'||p.state==='REQUIRED_BY'}).map(handoffItem);
+  const la=job&&job.labelAttest;
+  const labels=!la?'':(la.type==='NOT_REQUIRED'?'Labels declared not required — '+String(la.reason||'no reason recorded'):'Labels generated in Access — verify at final inspection');
+  return {items,labels}}
+const HANDOFF_GROUPS=[['price','Price'],['material','Material'],['hold','Holds for final inspection / shipping'],['other','Other']];
+function handoffGroup(it){return it.kind==='price'?'price':it.kind==='material-id'?'material':it.cls==='HOLD'?'hold':'other'}
+function handoffStatus(it){
+  if(it.state==='OVERRIDDEN'&&it.exception){const x=it.exception,mat=it.kind==='material-id';
+    return (mat?'PROCEED AT RISK':'SHIPMENT EXCEPTION')+' — authorized by '+x.approver+' · ref '+(mat?(x.aref||''):(x.accessRef||x.aref||''))+' · '+String(x.at||'').slice(0,10)+' · recorded by '+x.by+' · reason: '+x.reason
+      +(mat?' — material still unconfirmed; identify it before the job closes':' — verification still outstanding')}
+  if(it.state==='DEFERRED'&&it.deferredTo)return 'moved to '+it.deferredTo+(it.gate&&it.gate!==it.deferredTo?' (was due at '+it.gate+')':'');
+  return 'open — due at '+(it.effGate||it.gate||'the next stage')}
+// r30o (R30N-REV-02): ONE source for what a row says — the screen and the copied text both read it, so they cannot differ
+function handoffRows(job){const so=stillOpen(job);
+  return {labels:so.labels,count:so.items.length,groups:HANDOFF_GROUPS.map(([g,title])=>({title,
+    rows:so.items.filter(i=>handoffGroup(i)===g).map(it=>({label:it.label,status:handoffStatus(it),act:String(it.act||'').trim()}))})).filter(x=>x.rows.length)}}
+// the same list as plain text, for the traveler or the Access note
+function handoffText(job){const R=handoffRows(job),s2=((job&&job.signoffs)||[]).find(s=>s.stage==='SCR2'),L=[];
+  L.push((job.wo?'WO '+job.wo:'PO '+(job.po||''))+' — still open after SCR2'+(s2?' (SCR2 signed off by '+(s2.ini||'?')+(s2.date?' '+s2.date:'')+')':''));
+  for(const g of R.groups){L.push('',g.title.toUpperCase());
+    for(const r of g.rows){L.push('- '+r.label+' — '+r.status);if(r.act)L.push('  What to do: '+r.act.split('\n').join('\n  '))}}
+  if(R.labels)L.push('','LABELS','- '+R.labels);
+  if(!R.count)L.push('','No work items are still open.');
+  return L.join('\n')}
+window.copyHandoff=btn=>{const text=handoffText(S);let ok=false;
+  const done=()=>{const t=btn.textContent;btn.textContent='\u2713 Copied';btn.disabled=true;setTimeout(()=>{btn.textContent=t;btn.disabled=false},1200)};
+  const fallback=()=>{try{const ta=document.createElement('textarea');ta.value=text;ta.setAttribute('readonly','');ta.style.position='fixed';ta.style.opacity='0';
+      document.body.appendChild(ta);ta.select();ok=document.execCommand('copy');document.body.removeChild(ta)}catch(e){ok=false}
+    if(ok)done();else alert('Could not copy automatically. Select the list on the screen and copy it by hand.')};
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(text).then(done,fallback);else fallback()};
+// which screen a job at stage 'FI' shows. A tab choice only — never saved, never part of the job.
+const FI_VIEW=new WeakMap();
+function fiScreen(J){if(!J||J.stage!=='FI')return false;const v=FI_VIEW.get(J);if(v)return v==='FI';
+  return !!((J.caughtUp&&J.caughtUp.enteredAt==='FI')||J.fiReport||J.qtyCheck)} // a job already being worked at Final Inspection opens there, as before
+window.openFi=()=>{if(navBusy())return;FI_VIEW.set(S,'FI');render()};
+window.openDone=()=>{if(navBusy())return;FI_VIEW.set(S,'DONE');render()};
 // r27 one-question feedback → stored in the standing validity vocabulary
 function fqValidity(q){return q==='CAUGHT A REAL ISSUE'?'CONFIRMED ISSUE'
   :q==='ALREADY KNOWN / ROUTINE'?'ROUTINE / ALREADY KNOWN'
@@ -3064,6 +3181,8 @@ window.gateSCR2=()=>{if(navBusy())return;if(needRv())return; // r30j NAV-02: nev
   if(!S.scr2Report||reportStale('SCR2')){alert('Refused: there is no SCR2 report for the documents now on file (a document changed after the audit, or the audit never completed). Re-run the SCR2 audit.');return} // r29j F02/F03
   const blk2=openBlocking('SCR2');if(blk2.length){alert('Refused: '+blk2.length+' item(s) must be finished before this sign-off.');return}
   S.signoffs.push({stage:'SCR2',name:RV.name,ini:RV.ini,date:today()});S.stage='FI';
+  // r30n (B1): the hand-off list is written ONCE, here, before the save — for the final inspection tool and the harvest
+  S.handoff={at:new Date().toISOString(),by:RV.ini,build:BUILD.id,items:stillOpen(S).items};
   if(saveInstance()===null){persistDraft();render();return} // r29k
   render()};
 window.gateFI=()=>{if(navBusy())return;if(needRv())return; // r30j NAV-02
@@ -3113,7 +3232,7 @@ window.recordQtyCheck=()=>{if(needRv())return;
   }
   persistDraft();render();toast(exp===act?'✓ Quantity verified — '+act+' counted ('+RV.ini+')':'⚠ Quantity mismatch — a STOP was raised in the work items; record the reconciliation there ('+RV.ini+')')}
 window.attestLabels=cb=>{if(cb.checked){if(needRv()){cb.checked=false;return}
-    S.labelAttest={type:'GENERATED',by:RV.ini,name:RV.name,at:new Date().toISOString()};toast('✓ Label attestation recorded — Final Inspection verifies them')}
+    S.labelAttest={type:'GENERATED',by:RV.ini,name:RV.name,at:new Date().toISOString()};toast('✓ Label attestation recorded — verifying them goes on the still-open list')}
   else{if(labelsNotRequired())return;S.labelAttest=null}
   persistDraft();render()}
 // legacy instances carry labelAttest without a type — that IS the generated attestation
@@ -3140,13 +3259,15 @@ window.exportFeedback=()=>{
   a.download='fscr_feedback_'+(S.wo||S.po||'job')+'.json';a.click()};
 
 // ---- views -----------------------------------------------------------------------
-function stagesBar(){const map={SCR1:0,SCR2:1,FI:2,CLOSED:3};const cur=map[S?S.stage:'SCR1'];
+function stagesBar(fi){ // r30n (B1): FSCR ends at SCR2 — three steps. The Final Inspection screen (not in use) keeps its own four.
+  const steps=fi?['SCR1','SCR2','FINAL INSPECTION','CLOSED']:['SCR1','SCR2','DONE IN FSCR'];
+  const map=fi?{SCR1:0,SCR2:1,FI:2,CLOSED:3}:{SCR1:0,SCR2:1,FI:3,CLOSED:3};const cur=map[S?S.stage:'SCR1'];
   let warn='';
   if(S&&S.advancePo){warn+=`<p class="note" style="color:var(--gold-deep)"><b>ADVANCE PO</b> — Received Date is the PAPERWORK-received date (recorded by ${esc(S.advancePo.by)}); parts not physically received yet. Verify physical receipt — and run SCR2 on the revised PO if one arrives — before closing.</p>`;}
   if(S&&S.woInvalid){warn+=`<div class="card" style="border-color:var(--bad);margin-top:8px"><b style="color:var(--bad)">⚠ INVALID WO NUMBER ON THIS INSTANCE</b> — “${esc(String(S.wo).slice(0,40))}${String(S.wo).length>40?'…':''}” (${esc(S.woInvalid)}) Gates are blocked until corrected from Access.
     <div style="display:flex;gap:6px;margin-top:6px"><input id="fix-wo" placeholder="WO number (from Access)" style="width:160px"><button class="primary" onclick="fixWo()">Correct WO</button></div></div>`}
   if(S&&S.woFileMismatch){warn+=`<div class="card" style="border-color:var(--warn);margin-top:8px"><b style="color:var(--warn)">⚠ JOB IDENTITY MISMATCH acknowledged at load</b> — file said WO ${esc(S.woFileMismatch.file)}, instance says WO ${esc(S.woFileMismatch.instance)}. Confirm the embedded PO really belongs to this job before trusting any audit.</div>`}
-  return '<div class="stages">'+['SCR1','SCR2','FINAL INSPECTION','CLOSED'].map((o,i)=>
+  return '<div class="stages">'+steps.map((o,i)=>
     `<div class="${i<cur?'done':i===cur?'on':''}">${i<cur?'✓ ':''}${o}</div>`).join('')+'</div>'+warn}
 window.fixWo=()=>{if(needRv())return;const v=($('#fix-wo').value||'').trim().toUpperCase();
   const wv=validateWo(v);if(!wv.ok){alert(wv.reason);return}
@@ -3220,9 +3341,9 @@ window.addMissing=btn=>{if(needRv())return;const inp=btn.parentElement.querySele
 function viewLanding(){
   let draft=null;try{draft=localStorage.getItem('fscr.beta.draft')}catch(e){}
   return `<h2 style="margin-top:26px">FSCR Beta — real contract review, file-based instances</h2>
-  <p class="note">Live AI at every stage: SCR1 extracts the PO · SCR2 audits the completed traveler + labels against the PO ·
-  Final Inspection audits the COC + pack slip. Each stage saves an <b>instance file</b> that carries the job (documents included)
-  to the next reviewer — three different people per job, enforced. Rate the fields; when you close a finding, one optional question asks whether it was right. The collected instances are the
+  <p class="note">SCR1 extracts the PO · SCR2 audits the completed traveler against the PO. FSCR finishes at SCR2 and lists what is
+  still open for final inspection and shipping. Each stage saves an <b>instance file</b> that carries the job (documents included)
+  to the next reviewer — a different person at each stage, enforced. Rate the fields; when you close a finding, one optional question asks whether it was right. The collected instances are the
   feedback loop.</p>
   ${stagesBar()}
   <div class="sec"><h3>1 · API key</h3><span class="rule"></span></div>
@@ -3239,7 +3360,7 @@ function viewLanding(){
   <div class="card"><b style="font-size:12px">New job(s) \u2014 SCR1</b><br>
     <span class="hint">Choose 1\u201330 customer PO PDFs, then hit Extract. Each PO becomes its own job \u2014 and its own
     instance file to distribute. Live extraction runs 2 at a time (\u22481\u20132 min per PO). API cost is charged ONLY when an Extract/Run button calls the model \u2014 verifying, feedback, notes, and saving are free.
-    <b>COST NOTE:</b> each PO review runs two automatic checks and incurs both costs \u2014 shown separately and combined on the job screen. Results render after both finish.</span><br><br>
+    <b>COST NOTE:</b> each PO review is one AI call. Its cost is shown on the job screen.</span><br><br>
     ${PENDING.newPo
       ?`<span class="doc-meta mono">staged: ${PENDING.newPo.length} PO${PENDING.newPo.length>1?'s':''}
          ${PENDING.newPo.length<=5?'\u2014 '+PENDING.newPo.map(f=>esc(f.name)).join(', '):''}</span><br><br>
@@ -3248,7 +3369,7 @@ function viewLanding(){
       :`<input type="file" multiple accept="application/pdf" ${KEY.v?'':'disabled'} onchange="stageBatchInput(this)">`}
     ${KEY.v?'':'<span class="hint" style="color:var(--warn)"> activate the key first</span>'}</div>
   <div class="card"><b style="font-size:12px">Continue a job — load an instance</b><br>
-    <span class="hint">Someone handed you an instance file (SCR2 or Final Inspection duty).</span><br><br>
+    <span class="hint">Someone handed you an instance file (SCR2 duty, or a finished job to look up).</span><br><br>
     <input type="file" accept=".json" onchange="loadFile(this)"></div>
   <div class="card"><b style="font-size:12px">Batch SCR2 — audit up to 15 jobs in one sitting</b><br>
     <span class="hint">Load up to ${B2_CAP} SCR2-stage instance files plus their travelers in bulk — matched by EXACT WO
@@ -3264,7 +3385,7 @@ function viewLanding(){
     against those initials. You upload the documents (PO, traveler, COC…) on the stage screen.</span><br><br>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <select id="cu-stage" onchange="document.getElementById('cu-s2row').style.display=this.value==='FI'?'flex':'none'">
-        <option value="SCR2">Enter at SCR2</option><option value="FI">Enter at Final Inspection</option></select>
+        <option value="SCR2">Enter at SCR2</option><option value="FI">Enter at Final Inspection (not in use)</option></select>
       <input id="cu-wo" placeholder="WO number (from Access)" style="width:150px">
       <input id="cu-po" placeholder="PO number" style="width:130px">
       <input id="cu-cust" placeholder="Customer" style="width:170px">
@@ -3393,7 +3514,7 @@ function viewSCR2(){
   return `${BATCH.items.length&&S?`<div style="margin:14px 0 -6px"><button onclick="backToBatch()">\u2190 Batch queue</button></div>`:''}${b2Has(S)?`<div style="margin:14px 0 -6px"><button onclick="b2Back()">\u2190 Batch SCR2</button></div>`:''}${stagesBar()}${busyBox()}
   <h2>SCR2 — audit traveler &amp; labels <span class="badge b-navy mono">${S.wo?'WO '+esc(S.wo):'PO '+esc(S.po)}</span></h2>
   <p class="note">${esc(S.customer)} · SCR1 signed off by <b>${esc(s1?.name||'?')} (${esc(s1?.ini||'?')})</b>${s1&&s1.outside?' <span class="hint">(outside FSCR — job caught up mid-stream)</span>':''}.
-  The audit re-reads the PO — never SCR1's data — so an SCR1 error can't propagate. Labels are generated at this stage and verified at Final Inspection. You must be a different person (enforced at sign-off).</p>
+  The audit re-reads the PO — never SCR1's data — so an SCR1 error can't propagate. Labels are generated at this stage; verifying them goes on the still-open list. You must be a different person (enforced at sign-off).</p>
   ${idbar()}
   <div class="sec"><h3>Open work items — travel with the job</h3><span class="rule"></span></div>
   ${ledgerSection(!done)}
@@ -3403,7 +3524,7 @@ function viewSCR2(){
     ${S.scr1.fields.map(f=>`<tr><td>${esc(f.l)}</td><td><span class="st st-${f.s==='EXTRACTED'||f.s==='NOT_APPLICABLE'||f.s==='ENTRY'?'M':'W'}">${esc(f.s)}</span></td>
       <td class="mono">${esc(f.v)||'—'}${f.src!==undefined&&f.src!==f.v?`<div class="hint">PO states: ${esc(f.src)}</div>`:''}${f.orig!==undefined&&f.orig!==f.v?`<div class="hint">parser said: ${esc(f.orig)}</div>`:''}${f.why?`<div class="hint">${esc(f.why)}</div>`:''}</td>
       <td>${f.entry?'<span class="hint">Internal Access entry — no parser feedback</span>':accChip('scr2::scr1parse::'+f.k,'','ext')}</td></tr>`).join('')}</table></div>`:''}</details>
-  ${billingCard('Pricing &amp; billing — carried from SCR1 (price verification closes at Final Inspection)')}
+  ${billingCard('Pricing &amp; billing — carried from SCR1 (price verification is carried on the still-open list)')}
   <div class="sec"><h3>Documents</h3><span class="rule"></span></div>
   <div class="doc-grid">
     ${docCard('po','Current PO',true,'application/pdf')}
@@ -3415,7 +3536,7 @@ function viewSCR2(){
     <button class="primary" ${KEY.v&&S.docs.po&&S.docs.traveler&&!BUSY.on?'':'disabled'}
       title="${!KEY.v?'Activate the API key in the bar at the top of this screen':!S.docs.traveler?'Upload the completed traveler':''}"
       onclick="runScr2()">${r?'Re-run SCR2 audit':'Run SCR2 audit'}</button>
-    <span class="hint">${KEY.v?'The completed traveler vs the PO. Labels are generated at SCR2 and verified at Final Inspection. 2–4 minutes. API cost only on Run — everything else is free.':'API key required — activate in the bar at the top of this screen.'}</span></div>`:''}
+    <span class="hint">${KEY.v?'The completed traveler vs the PO. Labels are generated at SCR2; verifying them goes on the still-open list. 2–4 minutes. API cost only on Run — everything else is free.':'API key required — activate in the bar at the top of this screen.'}</span></div>`:''}
   ${r?`<p class="note" style="background:var(--navysoft);color:var(--ink);padding:10px 12px;border-radius:8px">${esc(r.summary)}</p>
    <h2 style="font-size:13px">Traveler vs. PO</h2>
    <div class="twrap"><table><tr><th>Field</th><th>PO (yardstick)</th><th>Traveler</th><th>Status + your rating</th></tr>
@@ -3427,14 +3548,14 @@ function viewSCR2(){
   ${cnCard()}
   ${saveRow()}
   <div class="sec"><h3>SCR2 sign-off</h3><span class="rule"></span></div>
-  <p class="note">Internal sign-off — mirrors Access. Reviewer must differ from SCR1 (enforced).</p>
-  ${done?`<div class="banner">✓ SCR2 signed off — ${esc(S.signoffs.find(s=>s.stage==='SCR2')?.name)} (${esc(S.signoffs.find(s=>s.stage==='SCR2')?.ini)}) · instance downloaded — hand it to the Final Inspection reviewer.</div>
+  <p class="note">Internal sign-off — mirrors Access. Reviewer must differ from SCR1 (enforced). Signing off finishes this job in FSCR and shows what is still open.</p>
+  ${done?`<div class="banner">✓ SCR2 signed off — ${esc(S.signoffs.find(s=>s.stage==='SCR2')?.name)} (${esc(S.signoffs.find(s=>s.stage==='SCR2')?.ini)}) · instance downloaded — FSCR is done; the still-open list goes with the job.</div>
     <div class="gatebox"><button class="primary" onclick="saveInstance()">Download instance again</button>
-    <button onclick="S.stage='FI';render()">Continue to Final Inspection here →</button>
+    <button onclick="S.stage='FI';render()">See what is still open →</button>
     <button onclick="nextJob()">Next job → (keeps key + identity)</button></div>`
   :`<div class="checklist">
      <label><input type="checkbox" ${S.labelAttest&&!labelsNotRequired()?'checked':''} onchange="attestLabels(this)">
-       Labels GENERATED in Access for this WO (attestation — they are verified at Final Inspection)${S.labelAttest&&!labelsNotRequired()?` <span class="hint">— ${esc(S.labelAttest.by)} ${esc((S.labelAttest.at||'').slice(0,10))}</span>`:''}</label>
+       Labels GENERATED in Access for this WO (attestation — verifying them goes on the still-open list)${S.labelAttest&&!labelsNotRequired()?` <span class="hint">— ${esc(S.labelAttest.by)} ${esc((S.labelAttest.at||'').slice(0,10))}</span>`:''}</label>
      <label><input type="checkbox" ${labelsNotRequired()?'checked':''} onchange="declareNoLabels(this,'SCR2')">
        This WO requires NO labels${labelsNotRequired()?` <span class="hint">— ${esc(S.labelAttest.reason)} · ${esc(S.labelAttest.by)} ${esc((S.labelAttest.at||'').slice(0,10))}</span>`:''}</label>
      ${!S.labelAttest?`<input id="nolabel-reason" placeholder="reason — required to declare no labels, recorded with your initials" style="max-width:420px">`:''}
@@ -3445,6 +3566,30 @@ function viewSCR2(){
       onclick="gateSCR2()">Sign off SCR2${RV.ini?' as '+esc(RV.ini):''}</button>
      <span class="hint">${!r?'Audit required before sign-off.':blocking.length?blocking.length+' open item(s) block sign-off — work the correction loop.':!S.labelAttest?'Label attestation (or a no-labels declaration) required.':'Ready.'}</span></div>`}`
 }
+
+// r30n (B1): the screen a job shows after SCR2 sign-off. It READS the job — the list is computed
+// from the ledger as it stands, so an instance saved before r30n (no hand-off record) shows the
+// same list and is not changed by being opened.
+function viewDone(){
+  const R=handoffRows(S),s2=S.signoffs.find(s=>s.stage==='SCR2'),h=S.handoff;
+  return `${BATCH.items.length&&S?`<div style="margin:14px 0 -6px"><button onclick="backToBatch()">\u2190 Batch queue</button></div>`:''}${b2Has(S)?`<div style="margin:14px 0 -6px"><button onclick="b2Back()">\u2190 Batch SCR2</button></div>`:''}${stagesBar()}${busyBox()}
+  <h2>Done in FSCR <span class="badge b-navy mono">${S.wo?'WO '+esc(S.wo):'PO '+esc(S.po)}</span></h2>
+  ${draftBanner()}
+  <div class="banner">\u2713 SCR2 signed off \u2014 ${esc(s2?.name||'?')} (${esc(s2?.ini||'?')})${s2&&s2.date?' \u00b7 '+esc(s2.date):''}${s2&&s2.outside?' (outside FSCR)':''}. FSCR's part of this job is finished.</div>
+  <p class="note">${esc(S.customer)} \u00b7 The items below are still open. They go with the job to final inspection and shipping.</p>
+  <div class="sec"><h3>Still open \u2014 ${R.count} item${R.count===1?'':'s'}</h3><span class="rule"></span></div>
+  ${R.groups.length?R.groups.map(g=>`<div class="card"><b style="font-size:12px">${esc(g.title)}</b>
+    ${g.rows.map(r=>`<div style="margin-top:8px"><b style="font-size:12px">${esc(r.label)}</b>
+      <div class="hint">${esc(r.status)}</div>${r.act?`<div class="hint" style="white-space:pre-wrap">What to do: ${esc(r.act)}</div>`:''}</div>`).join('')}</div>`).join('')
+   :`<p class="note">No work items are still open on this job.</p>`}
+  ${R.labels?`<div class="card"><b style="font-size:12px">Labels</b><div class="hint" style="margin-top:6px">${esc(R.labels)}</div></div>`:''}
+  <div class="gatebox"><button class="primary" onclick="copyHandoff(this)">Copy list</button>
+    <button onclick="saveInstance()">Download instance again</button>
+    <button onclick="nextJob()">Next job \u2192 (keeps key + identity)</button>
+    <span class="hint">\u201cCopy list\u201d puts this list, with each \u201cWhat to do\u201d line, on the clipboard as plain text for the traveler or the Access note.</span></div>
+  ${h&&Array.isArray(h.items)?`<p class="hint">Saved in the instance file at sign-off: ${h.items.length} item${h.items.length===1?'':'s'} \u00b7 ${esc(h.by||'')} ${esc(String(h.at||'').slice(0,10))} \u00b7 build ${esc(h.build||'')}</p>`:''}
+  ${isDirty()?saveRow():metricsLine()}
+  <p class="hint" style="margin-top:22px"><a href="#" style="color:inherit" onclick="openFi();return false">Final Inspection in FSCR \u2014 not in use</a></p>`}
 
 function viewFI(){
   const r=S.fiReport&&!reportStale('FI')?S.fiReport:null; // r29j F03: a stale report is not a report
@@ -3468,7 +3613,7 @@ function viewFI(){
       <button class="primary" onclick="recordQtyCheck()">Record count</button></div></div>`);
   const allChecked=HUMAN.every(h=>S.checklist[h[0]]);
   const so=st=>S.signoffs.find(s=>s.stage===st);
-  return `${BATCH.items.length&&S?`<div style="margin:14px 0 -6px"><button onclick="backToBatch()">\u2190 Batch queue</button></div>`:''}${b2Has(S)?`<div style="margin:14px 0 -6px"><button onclick="b2Back()">\u2190 Batch SCR2</button></div>`:''}${stagesBar()}${busyBox()}
+  return `${BATCH.items.length&&S?`<div style="margin:14px 0 -6px"><button onclick="backToBatch()">\u2190 Batch queue</button></div>`:''}${b2Has(S)?`<div style="margin:14px 0 -6px"><button onclick="b2Back()">\u2190 Batch SCR2</button></div>`:''}${S.stage==='FI'&&!(S.caughtUp&&S.caughtUp.enteredAt==='FI')?`<div style="margin:14px 0 -6px"><button onclick="openDone()">\u2190 Done in FSCR \u2014 what is still open</button></div>`:''}${stagesBar(true)}${busyBox()}
   <h2>Final Inspection <span class="badge b-navy mono">${S.wo?'WO '+esc(S.wo):'PO '+esc(S.po)}</span></h2>
   <p class="note">${esc(S.customer)} · SCR1: <b>${esc(so('SCR1')?.ini||'?')}</b> · SCR2: <b>${esc(so('SCR2')?.ini||'?')}</b>${(so('SCR1')?.outside||so('SCR2')?.outside)?' <span class="hint">(prior stages signed off outside FSCR — job caught up mid-stream)</span>':''}.
   You are the third set of eyes. Work items first — nothing ships with an open, undocumented finding.</p>
@@ -3605,13 +3750,8 @@ function keyBar(){
 // r30k UX-1 (FSCR Plan Review): the floor notice ships INSIDE the build. The first time a browser opens a
 // new build it shows what changed versus the live r29l; "Got it" hides it until the next build. Storage is
 // a per-browser convenience only — if it is blocked the card shows until dismissed for this tab.
-const WHATS_NEW=['The AI is asked for its answer. If a reply comes back without one, the tool asks once more. If there is still no answer you get a plain message and nothing is saved.',
-  'Error messages say what happened in plain words. A failed batch row has a “details” link with the full text.',
-  'SCR2 comparison rows have Useful / Noise buttons. Tap the rows that mattered.',
-  'If you change a field after answering its question, the question comes back for the new value. Marking a verified value “wrong vs the PO” removes its check mark: fix the value, then verify it again before copying.',
-  'While a job’s own SCR2 or Final Inspection audit is running, that job stays open: signing off, leaving it, running it again and loading another file wait until it finishes. Batch work never stops you moving between jobs.',
-  'Final Inspection reads its documents when it starts. If you replace one while it runs, the result is thrown away. Run it again.',
-  'Cost lines may say “billing unknown” or “at least” when the exact cost is not known.'];
+const WHATS_NEW=['FSCR now finishes at SCR2. After SCR2 sign-off the job shows “Done in FSCR” with a list of what is still open: price, material, holds for final inspection or shipping. “Copy list” puts it on the clipboard for the traveler or the Access note.',
+  'The second-model check on SCR1 is off. Nothing changes in what you do.'];
 let WN_HIDDEN=false;
 function whatsNewCard(){if(WN_HIDDEN)return '';let seen=null;try{seen=localStorage.getItem('fscr.beta.seenBuild')}catch(e){}
   if(seen===BUILD.id)return '';
@@ -3621,7 +3761,7 @@ function whatsNewCard(){if(WN_HIDDEN)return '';let seen=null;try{seen=localStora
 window.dismissWhatsNew=()=>{WN_HIDDEN=true;try{localStorage.setItem('fscr.beta.seenBuild',BUILD.id)}catch(e){}render()};
 function render(){
   updateTopbar();
-  $('#who').textContent=S?`stage: ${S.stage}${S.wo?' · WO '+S.wo:''}${S.po?' · PO '+S.po:''}`:'';
+  $('#who').textContent=S?`stage: ${S.stage==='FI'&&!fiScreen(S)?'DONE IN FSCR':S.stage}${S.wo?' · WO '+S.wo:''}${S.po?' · PO '+S.po:''}`:'';
   const m=$('#main');
   // r24 (A5): BATCH2.show is the ONLY batch-view authority. Items/refusals
   // restored from IndexedDB no longer force-route here — they render as a
@@ -3631,6 +3771,7 @@ function render(){
   if(!KEY.v&&(S.stage==='SCR1'&&!S.scr1)){m.innerHTML=whatsNewCard()+viewLanding();return}
   if(S.stage==='SCR1')m.innerHTML=whatsNewCard()+keyBar()+viewSCR1();
   else if(S.stage==='SCR2')m.innerHTML=whatsNewCard()+keyBar()+viewSCR2();
+  else if(S.stage==='FI'&&!fiScreen(S))m.innerHTML=whatsNewCard()+keyBar()+viewDone(); // r30n B1
   else m.innerHTML=whatsNewCard()+keyBar()+viewFI();
   window.scrollTo({top:document.body.scrollHeight>0?window.scrollY:0});
 }
